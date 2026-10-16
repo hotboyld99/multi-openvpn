@@ -39,5 +39,21 @@
     "vitest": "^5.0.5",
     "zod": "^4.6.7"
   },
-  "author": "Trung Hieu"
+  "author": "Trung Hieu",
+  "build": {
+    "appId": "dev.trunghieu.multiopenvpn",
+    "productName": "Multi OpenVPN",
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": "dmg",
+      "identity": "Electron Local Code Signing",
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": "nsis"
+    }
+  }
 }
