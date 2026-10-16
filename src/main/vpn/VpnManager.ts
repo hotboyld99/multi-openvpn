@@ -6,6 +6,7 @@ import {
   VpnErrorCode,
   type LogEntry,
   type LogLevel,
+  type SecretInput,
   type VpnConnection,
   type VpnError,
   type VpnProfile,
@@ -29,6 +30,8 @@ interface Entry {
   /** Consecutive failed attempts, indexes BACKOFF_MS. */
   attempt: number;
   retryTimer?: ReturnType<typeof setTimeout>;
+  /** Outstanding credential prompt; resolved by submitSecret/cancel or when the process goes away. */
+  secretWaiter?: (secret: SecretInput | null) => void;
   /** Byte counters restart with every process; totals carry over between attempts. */
   baseIn: number;
   baseOut: number;
@@ -116,6 +119,7 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
   async disconnect(connectionId: string): Promise<void> {
     const entry = this.require(connectionId);
     this.clearRetry(entry);
+    this.settleSecret(entry, null);
     const driver = entry.driver;
     if (!driver) {
       if (isLive(entry.conn.status)) this.finishStopped(entry);
@@ -134,6 +138,7 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
   async reconnect(connectionId: string): Promise<void> {
     const entry = this.require(connectionId);
     this.clearRetry(entry);
+    this.settleSecret(entry, null);
     const old = entry.driver;
     entry.generation++; // silence the old driver: its exit must not be treated as a crash
     entry.driver = undefined;
@@ -158,7 +163,39 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
     this.drop(entry);
   }
 
+  /** Answers the credential prompt of a connection. */
+  submitSecret(connectionId: string, secret: SecretInput): void {
+    const entry = this.require(connectionId);
+    const waiter = entry.secretWaiter;
+    if (!waiter) throw new Error('This connection is not waiting for credentials');
+    this.settleSecret(entry, secret);
+  }
+
+  /** The user dismissed the credential prompt: stop this connection. */
+  async cancelSecret(connectionId: string): Promise<void> {
+    const entry = this.require(connectionId);
+    this.settleSecret(entry, null);
+    if (isLive(entry.conn.status)) await this.disconnect(connectionId);
+  }
+
   // ---------------------------------------------------------------------------
+
+  private requestSecret(entry: Entry, generation: number, realm: string, needsUsername: boolean): Promise<SecretInput | null> {
+    if (entry.generation !== generation) return Promise.resolve(null);
+    this.settleSecret(entry, null); // a newer prompt replaces an unanswered one
+    const profile = this.deps.getProfile(entry.conn.profileId);
+    return new Promise((resolve) => {
+      entry.secretWaiter = resolve;
+      this.patch(entry, { status: 'AUTH', authRequest: { realm, needsUsername, username: profile?.username } });
+    });
+  }
+
+  private settleSecret(entry: Entry, secret: SecretInput | null): void {
+    const waiter = entry.secretWaiter;
+    entry.secretWaiter = undefined;
+    if (entry.conn.authRequest) this.patch(entry, { authRequest: undefined });
+    waiter?.(secret);
+  }
 
   private async startAttempt(entry: Entry): Promise<void> {
     const generation = ++entry.generation;
@@ -180,6 +217,7 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
       emit: (event) => {
         if (entry.generation === generation) this.onDriverEvent(entry, event);
       },
+      requestSecret: (req) => this.requestSecret(entry, generation, req.realm, req.needsUsername),
     });
     entry.driver = driver;
     this.patch(entry, {
@@ -253,11 +291,20 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
         return;
       }
 
-      case 'interface':
-        this.patch(entry, { interfaceName: event.name });
+      case 'netinfo':
+        this.patch(entry, {
+          ...(event.interfaceName ? { interfaceName: event.interfaceName } : {}),
+          ...(event.gateway ? { gateway: event.gateway } : {}),
+        });
         return;
 
       case 'error':
+        // The first fatal error is the cause; what openvpn logs after it are consequences
+        // (wrong key password → "Cannot load private key file" must stay AUTH_FAILED).
+        if (entry.pendingError && !isRetryable(entry.pendingError.code)) {
+          this.log(entry, 'debug', `Subsequent error ignored: ${event.error.detail ?? event.error.title}`);
+          return;
+        }
         entry.pendingError = event.error;
         this.patch(entry, { error: event.error });
         this.log(entry, 'error', `${event.error.title}: ${event.error.detail ?? event.error.message}`);
@@ -267,6 +314,7 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
 
       case 'exit': {
         entry.driver = undefined;
+        this.settleSecret(entry, null);
         if (entry.stopping) {
           this.finishStopped(entry);
           return;
@@ -331,6 +379,7 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
 
   private drop(entry: Entry): void {
     this.clearRetry(entry);
+    this.settleSecret(entry, null);
     entry.generation++;
     this.entries.delete(entry.conn.id);
     this.emit('removed', entry.conn.id);

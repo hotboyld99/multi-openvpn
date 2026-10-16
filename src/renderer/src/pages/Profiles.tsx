@@ -103,7 +103,7 @@ function ProfileRow({ profile, selected, onSelect }: { profile: VpnProfile; sele
           ]}
         />
       </div>
-      {conn?.status === 'ERROR' && <ErrorPanel connection={conn} />}
+      {conn?.status === 'ERROR' && <ErrorPanel connection={conn} actions />}
     </Card>
   );
 }

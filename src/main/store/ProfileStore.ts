@@ -121,7 +121,7 @@ export function demoProfiles(): VpnProfile[] {
   return [
     make('Company Singapore', 'ok'),
     make('Development VPN', 'ok'),
-    make('Office VPN', 'ok'),
+    make('Office VPN', 'auth', { username: 'alice' }),
     make('Staging', 'flaky'),
     make('Broken Auth', 'auth-fail'),
   ];

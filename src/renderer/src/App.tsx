@@ -1,5 +1,6 @@
 import { useEffect, type ComponentType } from 'react';
 import { X } from 'lucide-react';
+import { AuthDialog } from './components/AuthDialog';
 import { Sidebar } from './components/Sidebar';
 import { cn } from './lib/format';
 import { Connections } from './pages/Connections';
@@ -68,6 +69,7 @@ export function App() {
     <div className="flex h-full">
       <Sidebar />
       <main className="min-w-0 flex-1 overflow-auto">{ready ? <Current /> : <div className="p-6 text-muted">Loading…</div>}</main>
+      <AuthDialog />
       <Toasts />
     </div>
   );

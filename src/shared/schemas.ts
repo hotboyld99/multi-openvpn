@@ -44,3 +44,13 @@ export const SettingsPatchSchema = z
   .partial()
   .strict();
 export type SettingsPatch = z.infer<typeof SettingsPatchSchema>;
+
+// No control characters: a newline would terminate the management command and inject another.
+const noControl = (max: number) => z.string().max(max).regex(/^[^\x00-\x1f\x7f]*$/, 'Control characters are not allowed');
+
+export const SecretInputSchema = z
+  .object({
+    username: noControl(256).optional(),
+    password: noControl(1024),
+  })
+  .strict();

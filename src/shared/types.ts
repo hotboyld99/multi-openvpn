@@ -86,6 +86,20 @@ export interface VpnProfile {
   updatedAt: number;
 }
 
+/** OpenVPN is waiting for a secret (management `>PASSWORD:Need ...`). */
+export interface AuthRequest {
+  /** OpenVPN realm: 'Auth' (auth-user-pass), 'Private Key', 'HTTP Proxy', ... */
+  realm: string;
+  needsUsername: boolean;
+  /** Prefill for the username field. */
+  username?: string;
+}
+
+export interface SecretInput {
+  username?: string;
+  password: string;
+}
+
 export interface VpnConnection {
   id: string;
   profileId: string;
@@ -110,6 +124,8 @@ export interface VpnConnection {
   /** Epoch ms of the next automatic retry while RECONNECTING. */
   nextRetryAt?: number;
   error?: VpnError;
+  /** Set while the UI must ask the user for credentials. */
+  authRequest?: AuthRequest;
 }
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';

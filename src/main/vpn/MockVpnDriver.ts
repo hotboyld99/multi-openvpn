@@ -6,9 +6,10 @@ import type { DriverContext, VpnDriver } from './VpnDriver';
  * VPN_MOCK_MODE driver: walks the same state sequence a real openvpn reports and
  * generates traffic, so the whole app (VpnManager, IPC, UI) runs without a server.
  *
- * Demo profiles pick a scenario through their config path: mock://ok, mock://auth-fail, mock://flaky.
+ * Demo profiles pick a scenario through their config path: mock://ok, mock://auth (asks for
+ * username/password; password "wrong" fails), mock://auth-fail, mock://flaky.
  */
-export type MockScenario = 'ok' | 'auth-fail' | 'flaky';
+export type MockScenario = 'ok' | 'auth' | 'auth-fail' | 'flaky';
 
 let nextPid = 41_000;
 // Prefixed so a mock tunnel can never be mistaken for a real utunN of the OS.
@@ -16,7 +17,7 @@ let nextUtun = 0;
 let nextPort = 25_100;
 
 export const scenarioOf = (configPath: string): MockScenario => {
-  const m = /^mock:\/\/(ok|auth-fail|flaky)$/.exec(configPath);
+  const m = /^mock:\/\/(ok|auth|auth-fail|flaky)$/.exec(configPath);
   return (m?.[1] as MockScenario | undefined) ?? 'ok';
 };
 
@@ -58,6 +59,22 @@ export class MockVpnDriver implements VpnDriver {
       emit({ type: 'state', state: 'AUTH' });
     });
 
+    if (this.scenario === 'auth') {
+      // Real openvpn pauses here until the management client answers >PASSWORD.
+      this.at(800, async () => {
+        const secret = await this.ctx.requestSecret({ realm: 'Auth', needsUsername: true });
+        if (this.exited || !secret) return;
+        emit({ type: 'log', level: 'debug', message: "MANAGEMENT: CMD 'password [...]'" });
+        if (secret.password === 'wrong') {
+          emit({ type: 'log', level: 'error', message: 'AUTH: Received control message: AUTH_FAILED' });
+          emit({ type: 'error', error: vpnError(VpnErrorCode.AUTH_FAILED, 'AUTH: Received control message: AUTH_FAILED') });
+          return;
+        }
+        this.connectUp(0, ip, gateway, remote, utun, subnet);
+      });
+      return;
+    }
+
     if (this.scenario === 'auth-fail') {
       this.at(1200, () => {
         emit({ type: 'log', level: 'error', message: 'AUTH: Received control message: AUTH_FAILED' });
@@ -66,17 +83,29 @@ export class MockVpnDriver implements VpnDriver {
       return;
     }
 
-    this.at(1100, () => emit({ type: 'state', state: 'GET_CONFIG' }));
-    this.at(1400, () => {
+    this.connectUp(1100, ip, gateway, remote, utun, subnet);
+
+    if (this.scenario === 'flaky') {
+      this.at(20_000, () => {
+        emit({ type: 'log', level: 'error', message: 'Inactivity timeout (--ping-restart), restarting' });
+        this.exit(1, null);
+      });
+    }
+  }
+
+  private connectUp(t: number, ip: string, gateway: string, remote: string, utun: string, subnet: number): void {
+    const { emit } = this.ctx;
+    this.at(t, () => emit({ type: 'state', state: 'GET_CONFIG' }));
+    this.at(t + 300, () => {
       emit({ type: 'log', level: 'info', message: `Opened utun device ${utun}` });
-      emit({ type: 'interface', name: utun });
+      emit({ type: 'netinfo', interfaceName: utun });
       emit({ type: 'state', state: 'ASSIGN_IP', localIp: ip });
     });
-    this.at(1700, () => {
+    this.at(t + 600, () => {
       emit({ type: 'log', level: 'info', message: `/sbin/route add -net 10.${subnet}.0.0 ${gateway} 255.255.0.0` });
       emit({ type: 'state', state: 'ADD_ROUTES' });
     });
-    this.at(2000, () => {
+    this.at(t + 900, () => {
       emit({ type: 'log', level: 'info', message: 'Initialization Sequence Completed' });
       emit({ type: 'state', state: 'CONNECTED', localIp: ip, remote, gateway });
       this.traffic = setInterval(() => {
@@ -86,13 +115,6 @@ export class MockVpnDriver implements VpnDriver {
         emit({ type: 'bytes', bytesIn: this.bytesIn, bytesOut: this.bytesOut });
       }, 1_000);
     });
-
-    if (this.scenario === 'flaky') {
-      this.at(20_000, () => {
-        emit({ type: 'log', level: 'error', message: 'Inactivity timeout (--ping-restart), restarting' });
-        this.exit(1, null);
-      });
-    }
   }
 
   async stop(): Promise<void> {
@@ -111,7 +133,7 @@ export class MockVpnDriver implements VpnDriver {
     this.ctx.emit({ type: 'exit', code, signal });
   }
 
-  private at(ms: number, fn: () => void): void {
+  private at(ms: number, fn: () => void | Promise<void>): void {
     this.timers.push(setTimeout(fn, ms));
   }
 

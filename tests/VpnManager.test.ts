@@ -20,7 +20,7 @@ class FakeDriver implements VpnDriver {
   }
   connectUp(ip = '10.8.0.2'): void {
     for (const state of ['WAIT', 'AUTH', 'GET_CONFIG', 'ASSIGN_IP', 'ADD_ROUTES']) this.ctx.emit({ type: 'state', state });
-    this.ctx.emit({ type: 'interface', name: `utun-${this.ctx.profile.name}` });
+    this.ctx.emit({ type: 'netinfo', interfaceName: `utun-${this.ctx.profile.name}` });
     this.ctx.emit({ type: 'state', state: 'CONNECTED', localIp: ip });
   }
   crash(): void {
@@ -299,5 +299,19 @@ describe('Multi-VPN isolation (mock drivers)', () => {
     await done;
     expect(manager.activeCount()).toBe(0);
     expect(manager.list().every((c) => c.status === 'DISCONNECTED')).toBe(true);
+  });
+});
+
+describe('VpnManager error precedence', () => {
+  it('keeps the first fatal error when consequences follow', async () => {
+    const a = profile('a', { reconnect: true });
+    const { manager, driverOf } = setup([a]);
+    const id = manager.connect(a.id);
+    await flush();
+    driverOf(a).ctx.emit({ type: 'error', error: vpnError(VpnErrorCode.AUTH_FAILED) });
+    driverOf(a).ctx.emit({ type: 'error', error: vpnError(VpnErrorCode.INVALID_CONFIG) });
+    await flush();
+    expect(manager.get(id)!.status).toBe('ERROR');
+    expect(manager.get(id)!.error?.code).toBe(VpnErrorCode.AUTH_FAILED);
   });
 });

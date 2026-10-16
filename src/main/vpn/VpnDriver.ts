@@ -1,4 +1,4 @@
-import type { LogLevel, VpnError, VpnProfile, VpnStatus } from '../../shared/types';
+import type { LogLevel, SecretInput, VpnError, VpnProfile, VpnStatus } from '../../shared/types';
 
 /**
  * Raw events a driver reports for its own connection. A driver knows nothing about
@@ -8,7 +8,8 @@ export type DriverEvent =
   | { type: 'state'; state: string; localIp?: string; remote?: string; gateway?: string }
   | { type: 'log'; level: LogLevel; message: string }
   | { type: 'bytes'; bytesIn: number; bytesOut: number }
-  | { type: 'interface'; name: string }
+  /** Tunnel details learned from the log: interface name, pushed gateway. */
+  | { type: 'netinfo'; interfaceName?: string; gateway?: string }
   /** A failure detected while the process is still alive (e.g. AUTH_FAILED in the log). */
   | { type: 'error'; error: VpnError }
   /** The process is gone. Must be emitted exactly once per started driver. */
@@ -23,10 +24,17 @@ export interface VpnDriver {
   stop(): Promise<void>;
 }
 
+export interface SecretRequest {
+  realm: string;
+  needsUsername: boolean;
+}
+
 export interface DriverContext {
   connectionId: string;
   profile: VpnProfile;
   emit(event: DriverEvent): void;
+  /** Asks the user (or, later, secure storage) for a secret. Resolves null when cancelled. */
+  requestSecret(req: SecretRequest): Promise<SecretInput | null>;
 }
 
 export type DriverFactory = (ctx: DriverContext) => VpnDriver;

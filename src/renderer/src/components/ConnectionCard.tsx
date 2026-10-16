@@ -13,7 +13,8 @@ function Row({ label, value }: { label: string; value?: string | number }) {
   );
 }
 
-export function ErrorPanel({ connection }: { connection: VpnConnection }) {
+/** `actions` adds Retry / View Logs (the card already has its own buttons). */
+export function ErrorPanel({ connection, actions = false }: { connection: VpnConnection; actions?: boolean }) {
   const now = useNow();
   const { error } = connection;
   if (!error) return null;
@@ -27,6 +28,16 @@ export function ErrorPanel({ connection }: { connection: VpnConnection }) {
       <p className="mt-1 text-xs text-muted">{error.message}</p>
       {connection.status === 'RECONNECTING' && retryIn !== null && (
         <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">Retrying in {retryIn}s…</p>
+      )}
+      {actions && connection.status === 'ERROR' && (
+        <div className="mt-2 flex gap-2">
+          <Button size="sm" onClick={() => run(() => window.vpn.reconnect(connection.id))}>
+            <RotateCw className="h-3.5 w-3.5" /> {error.code === 'AUTH_FAILED' ? 'Retry / Edit Credentials' : 'Retry'}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => navigate('logs', connection.id)}>
+            <ScrollText className="h-3.5 w-3.5" /> View Logs
+          </Button>
+        </div>
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -110,6 +110,10 @@ beforeAll(async () => {
   lab = await createLab();
 }, 30_000);
 afterAll(() => lab?.cleanup());
+const managers: VpnManager[] = [];
+afterEach(async () => {
+  await Promise.all(managers.splice(0).map((m) => m.disconnectAll()));
+});
 
 describe('OpenVpnDriver with real openvpn', () => {
   function realManager(profiles: VpnProfile[]) {
@@ -119,6 +123,7 @@ describe('OpenVpnDriver with real openvpn', () => {
       getProfile: (id) => byId.get(id),
       createDriver: (ctx) => new OpenVpnDriver(ctx, { processes, binary: () => lab!.binary, stopTimeoutMs: 3_000 }),
     });
+    managers.push(manager);
     return { manager, processes };
   }
 

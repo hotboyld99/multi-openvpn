@@ -4,6 +4,7 @@ import type {
   AppSettings,
   LogEntry,
   NetworkInterfaceInfo,
+  SecretInput,
   VpnConnection,
   VpnProfile,
 } from './types';
@@ -22,6 +23,8 @@ export const IPC = {
   vpnGetLogs: 'vpn:getLogs',
   vpnClearLogs: 'vpn:clearLogs',
   vpnExportLogs: 'vpn:exportLogs',
+  vpnSubmitSecret: 'vpn:submitSecret',
+  vpnCancelSecret: 'vpn:cancelSecret',
 
   profilesList: 'profiles:list',
   profilesUpdate: 'profiles:update',
@@ -69,6 +72,10 @@ export interface VpnApi {
   clearLogs(connectionId: string): Promise<void>;
   /** Opens a save dialog in main; resolves false when the user cancels. */
   exportLogs(connectionId: string): Promise<boolean>;
+  /** Answers `connection.authRequest`. The secret goes to openvpn's management socket only. */
+  submitSecret(connectionId: string, secret: SecretInput): Promise<void>;
+  /** Dismisses the prompt and disconnects. */
+  cancelSecret(connectionId: string): Promise<void>;
   onConnection(cb: (connection: VpnConnection) => void): Unsubscribe;
   onConnectionRemoved(cb: (connectionId: string) => void): Unsubscribe;
   onLog(cb: (event: LogEvent) => void): Unsubscribe;
