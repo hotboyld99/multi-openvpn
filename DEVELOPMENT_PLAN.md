@@ -22,3 +22,24 @@ short report (Completed / Changed files / Decisions / How to test / Limitations 
   imports so vitest runs it directly.
 - No `exec`, no `shell: true`, no string-built commands.
 - Mock mode: `VPN_MOCK_MODE=true npm run dev`.
+
+## Status
+
+| Phase | State |
+|---|---|
+| 1 Foundation | done |
+| 2 OpenVPN runner | done |
+| 3 Management interface | done |
+| 4 Profiles | done |
+| 5 Multi VPN | done |
+| 6–9 | pending |
+
+## Testing real OpenVPN without root
+
+`tests/helpers/openvpnLab.ts` builds a throwaway PKI with `openssl` and runs
+point-to-point TLS servers with `--dev null`, so real `openvpn` clients connect
+without a tun device or root. Integration tests (management interface, private key
+prompt, TLS errors, 3 concurrent connections, crash isolation, orphan cleanup) run
+against it and are skipped automatically when `openvpn` or `openssl` is missing.
+Server mode (`auth-user-pass`, pushed routes/DNS, real tun interfaces) needs root and
+is covered by a fake management server plus manual testing.

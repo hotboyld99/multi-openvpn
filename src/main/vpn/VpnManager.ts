@@ -48,6 +48,8 @@ export interface VpnManagerEvents {
 export interface VpnManagerDeps {
   createDriver: DriverFactory;
   getProfile(id: string): VpnProfile | undefined;
+  /** Finds the OS interface holding an address; fallback when openvpn did not log the tunnel name. */
+  resolveInterface?(ip: string): string | undefined;
 }
 
 /**
@@ -265,6 +267,11 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
           // openvpn restarted the tunnel itself (ping-restart, TLS renegotiation failure, ...)
           entry.conn.reconnectCount++;
           patch.connectedAt = undefined;
+        }
+        const ip = event.localIp ?? entry.conn.assignedIp;
+        if (ip && !entry.conn.interfaceName && (status === 'ASSIGN_IP' || status === 'CONNECTED')) {
+          const name = this.deps.resolveInterface?.(ip);
+          if (name) patch.interfaceName = name;
         }
         if (status === 'CONNECTED') {
           entry.attempt = 0;

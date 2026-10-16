@@ -116,7 +116,7 @@ export class OpenVpnDriver implements VpnDriver {
       throw new VpnDriverError(vpnError(code, e.message));
     }
     started = true;
-    this.deps.processes.register(connectionId, proc);
+    this.deps.processes.register(connectionId, proc, res.workDir);
     void this.attach(mgmt, proc);
   }
 

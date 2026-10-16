@@ -1,4 +1,5 @@
 import { app, BrowserWindow, shell } from 'electron';
+import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { EVENTS } from '../shared/ipc';
@@ -59,6 +60,7 @@ app.on('web-contents-created', (_e, contents) => {
 });
 
 async function bootstrap(): Promise<void> {
+  if (!app.hasSingleInstanceLock()) return;
   const root = app.getPath('userData');
   const profiles = new ProfileStore(root);
   const settings = new SettingsStore(root);
@@ -71,12 +73,17 @@ async function bootstrap(): Promise<void> {
   let openvpn: OpenVpnBinaryInfo | null = null;
 
   const processes = new VpnProcessManager(join(app.getPath('temp'), 'multi-openvpn'));
-  // If main dies without a graceful disconnect, do not leave orphaned openvpn processes behind.
+  // If main dies without a graceful disconnect, do not leave orphaned openvpn processes behind;
+  // if it was killed too hard for that, stop what the previous run left over now.
   process.on('exit', () => processes.killAll());
+  const orphans = await processes.cleanupOrphans();
+  if (orphans.length) console.warn(`Stopped ${orphans.length} orphaned openvpn process(es): ${orphans.join(', ')}`);
 
   const createDriver: DriverFactory = (dctx) =>
     mockMode ? new MockVpnDriver(dctx) : new OpenVpnDriver(dctx, { processes, binary: () => openvpn });
-  const manager = new VpnManager({ createDriver, getProfile: (id) => profiles.get(id) });
+  const resolveInterface = (ip: string): string | undefined =>
+    Object.entries(networkInterfaces()).find(([, addrs]) => addrs?.some((a) => a.address === ip))?.[0];
+  const manager = new VpnManager({ createDriver, getProfile: (id) => profiles.get(id), resolveInterface });
 
   const appInfo = (): AppInfo => ({
     version: app.getVersion(),
@@ -130,6 +137,17 @@ async function bootstrap(): Promise<void> {
 }
 
 app.on('window-all-closed', () => app.quit());
+
+// One instance only: two instances would share (and clean up) each other's openvpn processes.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  });
+}
 
 app
   .whenReady()
