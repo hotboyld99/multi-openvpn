@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
-import { Copy, Ellipsis, FileText, Pencil, Power, RefreshCw, Rocket, Search, Trash2, Unplug } from 'lucide-react';
+import { Copy, Download, Ellipsis, Eye, FileCode, FileText, FileUp, Pencil, Power, RefreshCw, Rocket, Search, Trash2, Unplug } from 'lucide-react';
 import { isLive, type VpnProfile } from '../../../shared/types';
 import { ErrorPanel } from '../components/ConnectionCard';
 import { Button, Card, EmptyState, Input, Menu, PageHeader, StatusBadge } from '../components/ui';
 import { cn, timeAgo } from '../lib/format';
-import { connectionOf, run, useNow, useStore } from '../store';
+import { connectionOf, openConfig, run, startImport, useNow, useStore } from '../store';
 
 function ProfileRow({ profile, selected, onSelect }: { profile: VpnProfile; selected: boolean; onSelect: (v: boolean) => void }) {
   const connections = useStore((s) => s.connections);
@@ -86,6 +86,17 @@ function ProfileRow({ profile, selected, onSelect }: { profile: VpnProfile; sele
           }
           items={[
             { label: 'Rename', icon: <Pencil className="h-3.5 w-3.5" />, onSelect: () => setEditing(true) },
+            ...(profile.configPath.startsWith('mock://')
+              ? []
+              : [
+                  { label: 'View config', icon: <Eye className="h-3.5 w-3.5" />, onSelect: () => openConfig(profile.id, false) },
+                  { label: 'Edit config', icon: <FileCode className="h-3.5 w-3.5" />, onSelect: () => openConfig(profile.id, true) },
+                  {
+                    label: 'Export profile',
+                    icon: <Download className="h-3.5 w-3.5" />,
+                    onSelect: () => void run(() => window.vpn.profiles.exportConfig(profile.id)),
+                  },
+                ]),
             { label: 'Duplicate', icon: <Copy className="h-3.5 w-3.5" />, onSelect: () => void run(() => window.vpn.profiles.duplicate(profile.id)) },
             {
               label: 'Auto reconnect',
@@ -146,9 +157,14 @@ export function Profiles() {
         title="Profiles"
         subtitle={`${profiles.length} profile${profiles.length === 1 ? '' : 's'}`}
         actions={
-          <Button variant="danger" disabled={!anyLive} onClick={() => run(() => window.vpn.disconnectAll())}>
-            <Unplug className="h-4 w-4" /> Disconnect All
-          </Button>
+          <>
+            <Button variant="primary" onClick={async () => startImport((await run(() => window.vpn.profiles.pickFiles())) ?? [])}>
+              <FileUp className="h-4 w-4" /> Import
+            </Button>
+            <Button variant="danger" disabled={!anyLive} onClick={() => run(() => window.vpn.disconnectAll())}>
+              <Unplug className="h-4 w-4" /> Disconnect All
+            </Button>
+          </>
         }
       />
       <div className="flex flex-col gap-3 px-6 pb-8">
@@ -176,7 +192,7 @@ export function Profiles() {
 
         {profiles.length === 0 ? (
           <EmptyState icon={<FileText className="h-8 w-8" />} title="No profiles">
-            Profile import (.ovpn / .conf, drag & drop) arrives in Phase 4. Run with VPN_MOCK_MODE=true for demo profiles.
+            Click Import or drop .ovpn / .conf files anywhere on this window. Several files can be imported at once.
           </EmptyState>
         ) : visible.length === 0 ? (
           <EmptyState icon={<Search className="h-8 w-8" />} title={`No profile matches "${query}"`} />

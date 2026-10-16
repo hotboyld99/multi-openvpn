@@ -1,6 +1,8 @@
-import { useEffect, type ComponentType } from 'react';
-import { X } from 'lucide-react';
+import { useEffect, useState, type ComponentType, type DragEvent } from 'react';
+import { FileUp, X } from 'lucide-react';
 import { AuthDialog } from './components/AuthDialog';
+import { ConfigDialog } from './components/ConfigDialog';
+import { ImportDialog } from './components/ImportDialog';
 import { Sidebar } from './components/Sidebar';
 import { cn } from './lib/format';
 import { Connections } from './pages/Connections';
@@ -10,7 +12,7 @@ import { Logs } from './pages/Logs';
 import { Profiles } from './pages/Profiles';
 import { Routes } from './pages/Routes';
 import { Settings } from './pages/Settings';
-import { initStore, useStore, type Page } from './store';
+import { initStore, startImport, useStore, type Page } from './store';
 
 const PAGES: Record<Page, ComponentType> = {
   dashboard: Dashboard,
@@ -64,13 +66,42 @@ export function App() {
     void initStore();
   }, []);
 
+  // Drop .ovpn/.conf files anywhere on the window to import them.
+  const [dragging, setDragging] = useState(false);
+  const hasFiles = (e: DragEvent): boolean => e.dataTransfer.types.includes('Files');
+  const onDrop = (e: DragEvent): void => {
+    e.preventDefault();
+    setDragging(false);
+    const paths = [...e.dataTransfer.files].map((f) => window.vpn.profiles.pathForFile(f)).filter(Boolean);
+    void startImport(paths);
+  };
+
   const Current = PAGES[page];
   return (
-    <div className="flex h-full">
+    <div
+      className="flex h-full"
+      onDragOver={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false);
+      }}
+      onDrop={onDrop}
+    >
       <Sidebar />
       <main className="min-w-0 flex-1 overflow-auto">{ready ? <Current /> : <div className="p-6 text-muted">Loading…</div>}</main>
+      <ImportDialog />
+      <ConfigDialog />
       <AuthDialog />
       <Toasts />
+      {dragging && (
+        <div className="pointer-events-none fixed inset-3 z-50 flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-accent bg-accent/10 text-accent">
+          <FileUp className="h-8 w-8" />
+          <div className="font-medium">Drop .ovpn or .conf files to import</div>
+        </div>
+      )}
     </div>
   );
 }

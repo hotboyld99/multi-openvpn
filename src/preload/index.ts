@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 import { EVENTS, IPC, type VpnApi } from '../shared/ipc';
 
 // Sandboxed preload: the only bridge between UI and main. No Node APIs are exposed.
@@ -36,6 +36,14 @@ const api: VpnApi = {
     duplicate: (id) => invoke(IPC.profilesDuplicate, id),
     remove: (id) => invoke(IPC.profilesRemove, id),
     onChanged: (cb) => subscribe(EVENTS.profilesChanged, cb),
+    pickFiles: () => invoke(IPC.profilesPickFiles),
+    pathForFile: (file) => webUtils.getPathForFile(file),
+    previewImport: (paths) => invoke(IPC.profilesPreviewImport, paths),
+    import: (requests) => invoke(IPC.profilesImport, requests),
+    readConfig: (id) => invoke(IPC.profilesReadConfig, id),
+    checkConfig: (id, text) => invoke(IPC.profilesCheckConfig, id, text),
+    writeConfig: (id, text, acceptDangerous) => invoke(IPC.profilesWriteConfig, id, text, acceptDangerous),
+    exportConfig: (id) => invoke(IPC.profilesExport, id),
   },
 
   network: {

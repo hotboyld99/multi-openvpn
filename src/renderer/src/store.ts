@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import type { AppInfo, AppSettings, LogEntry, VpnConnection, VpnProfile } from '../../shared/types';
+import type { AppInfo, AppSettings, ImportPreview, LogEntry, VpnConnection, VpnProfile } from '../../shared/types';
 
 // Central renderer state. Connections are keyed by connectionId — there is no global "connected" flag.
 
@@ -22,6 +22,10 @@ export interface State {
   connections: Record<string, VpnConnection>;
   logs: Record<string, LogEntry[]>;
   toasts: Toast[];
+  /** Files waiting for import confirmation. */
+  importPreviews: ImportPreview[] | null;
+  /** Profile whose config is open in the viewer/editor. */
+  configEditor: { profileId: string; edit: boolean } | null;
 }
 
 const MAX_LOGS_PER_CONNECTION = 2_000;
@@ -36,6 +40,8 @@ let state: State = {
   connections: {},
   logs: {},
   toasts: [],
+  importPreviews: null,
+  configEditor: null,
 };
 const listeners = new Set<() => void>();
 
@@ -57,6 +63,21 @@ export function useStore<T>(selector: (s: State) => T): T {
 export function navigate(page: Page, logsFor?: string): void {
   set((s) => ({ page, logsFor: logsFor ?? s.logsFor }));
 }
+
+/** Scans the given files and opens the import dialog. */
+export async function startImport(paths: string[]): Promise<void> {
+  if (paths.length === 0) return;
+  const previews = await run(() => window.vpn.profiles.previewImport(paths));
+  if (previews) set(() => ({ importPreviews: previews, page: 'profiles' }));
+}
+
+export const closeImport = (): void => set(() => ({ importPreviews: null }));
+
+export function openConfig(profileId: string, edit: boolean): void {
+  set(() => ({ configEditor: { profileId, edit } }));
+}
+
+export const closeConfig = (): void => set(() => ({ configEditor: null }));
 
 let toastSeq = 0;
 export function toast(message: string, kind: Toast['kind'] = 'error'): void {

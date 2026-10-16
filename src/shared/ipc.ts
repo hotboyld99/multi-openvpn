@@ -2,7 +2,9 @@ import type {
   AppInfo,
   OpenVpnBinaryInfo,
   AppSettings,
+  ImportPreview,
   LogEntry,
+  ProfileScan,
   NetworkInterfaceInfo,
   SecretInput,
   VpnConnection,
@@ -30,6 +32,13 @@ export const IPC = {
   profilesUpdate: 'profiles:update',
   profilesDuplicate: 'profiles:duplicate',
   profilesRemove: 'profiles:remove',
+  profilesPickFiles: 'profiles:pickFiles',
+  profilesPreviewImport: 'profiles:previewImport',
+  profilesImport: 'profiles:import',
+  profilesReadConfig: 'profiles:readConfig',
+  profilesCheckConfig: 'profiles:checkConfig',
+  profilesWriteConfig: 'profiles:writeConfig',
+  profilesExport: 'profiles:export',
 
   networkGetInterfaces: 'network:getInterfaces',
 
@@ -86,6 +95,19 @@ export interface VpnApi {
     duplicate(id: string): Promise<VpnProfile>;
     remove(id: string): Promise<void>;
     onChanged(cb: (profiles: VpnProfile[]) => void): Unsubscribe;
+    /** Native file dialog (multi-select .ovpn/.conf); resolves [] when cancelled. */
+    pickFiles(): Promise<string[]>;
+    /** Absolute path of a file dropped on the window. */
+    pathForFile(file: File): string;
+    /** Parses and security-scans files without importing them. */
+    previewImport(paths: string[]): Promise<ImportPreview[]>;
+    import(requests: { path: string; name: string; acceptDangerous: boolean }[]): Promise<{ imported: VpnProfile[]; failures: string[] }>;
+    readConfig(id: string): Promise<string>;
+    /** Scan an edited config without saving it. */
+    checkConfig(id: string, text: string): Promise<ProfileScan>;
+    writeConfig(id: string, text: string, acceptDangerous: boolean): Promise<ProfileScan>;
+    /** Save dialog → single self-contained .ovpn with inline certificates. */
+    exportConfig(id: string): Promise<boolean>;
   };
 
   network: {

@@ -63,7 +63,7 @@ export function Dashboard() {
 
         {profiles.length === 0 ? (
           <EmptyState icon={<FileText className="h-8 w-8" />} title="No profiles yet">
-            Import .ovpn files on the Profiles page to get started.
+            Import .ovpn files on the Profiles page, or drop them anywhere on this window.
           </EmptyState>
         ) : (
           <>

@@ -181,3 +181,32 @@ export interface AppInfo {
   mockMode: boolean;
   openvpn: OpenVpnBinaryInfo | null;
 }
+
+export type FindingSeverity = 'ok' | 'info' | 'warning' | 'danger';
+
+export interface SecurityFinding {
+  severity: FindingSeverity;
+  title: string;
+  detail?: string;
+  line?: number;
+}
+
+/** Result of scanning a config before import/save. */
+export interface ProfileScan {
+  findings: SecurityFinding[];
+  /** The config may execute local commands or load plugins: the user must confirm. */
+  dangerous: boolean;
+  /** Problems that prevent using the config at all (parse errors, missing files). */
+  errors: string[];
+  remotes: string[];
+  needsCredentials: boolean;
+  wantsDefaultRoute: boolean;
+}
+
+export interface ImportPreview {
+  /** Absolute source path, echoed back on confirm. */
+  path: string;
+  fileName: string;
+  suggestedName: string;
+  scan: ProfileScan;
+}

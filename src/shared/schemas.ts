@@ -54,3 +54,13 @@ export const SecretInputSchema = z
     password: noControl(1024),
   })
   .strict();
+
+export const PathSchema = z.string().min(1).max(4096);
+export const PathListSchema = z.array(PathSchema).min(1).max(50);
+
+export const ImportRequestSchema = z
+  .object({ path: PathSchema, name: z.string().trim().max(100), acceptDangerous: z.boolean() })
+  .strict();
+export const ImportRequestListSchema = z.array(ImportRequestSchema).min(1).max(50);
+
+export const ConfigTextSchema = z.string().max(1024 * 1024);
