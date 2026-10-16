@@ -173,17 +173,40 @@ OpenVPN management `STATE` names map 1:1 where they exist (`RESOLVE`/`TCP_CONNEC
 
 | Platform | Helper install | Transport |
 |---|---|---|
-| macOS | launchd daemon in `/Library/LaunchDaemons` (installed once via Authorization prompt; SMAppService when the app is signed/notarized) | unix socket, owner-checked |
-| Windows | Windows Service (installed by the NSIS installer with UAC) | named pipe with ACL for the installing user |
+| macOS | Settings → Install helper: administrator prompt; the app bundle is copied to `/Library/Application Support/MultiOpenVPN/Helper.app` (root-owned), `helper.js --setup` writes the config, a launchd daemon `com.multiopenvpn.helper` runs it | unix socket `/var/run/multi-openvpn-helper.sock`, mode 0600, owned by the installing user |
+| Windows | Windows Service registered by the installer (Phase 9) | named pipe `\\.\pipe\multi-openvpn-helper` |
+| Dev | `npm run build && npm run helper:dev` (sudo, config in `.dev-helper/`) | `/tmp/mov-dev-<uid>.sock` |
 
-The helper is a separate Node entry (`src/helper`) run by the bundled Electron binary
-with `ELECTRON_RUN_AS_NODE=1`. Its RPC surface: `spawnOpenVpn`, `kill`, `addRoute`,
-`removeRoute`, `setDns`, `restoreDns`, `listOwned`. Every argument is validated; paths
-must live under the app's profile/temp directories; the binary path must be the
-resolved OpenVPN binary.
+The helper is `out/main/helper.js`, run by the app's own Electron binary with
+`ELECTRON_RUN_AS_NODE=1`. It does not trust the app:
 
-`ProcessLauncher` in main has two implementations: `DirectLauncher` (dev, mock,
-tests, or when main is already privileged) and `HelperLauncher`.
+- **Auth**: first message must be `hello` with the install-time token (readable only by the
+  installing user); compared in constant time.
+- **Binary**: only OpenVPN binaries approved at install time, pinned by SHA-256 (re-install after
+  upgrading OpenVPN).
+- **Arguments**: `validateOpenVpnArgs` accepts exactly the grammar the app produces (`--cd`,
+  `--config`, `--management 127.0.0.1 <port> <pwfile>`, pull filters, `--route`,
+  `--route-ipv6`); every path must be inside the user's profile/temp roots (symlinks resolved).
+- **Config**: copied into a root-owned run directory before validation (no TOCTOU);
+  `plugin`, nested `config`, `iproute` are refused; file writers (`status`, `log`, `writepid`…)
+  and script hooks are removed; file references must be plain names inside the profile folder;
+  `--script-security 1` is always appended.
+- **Session cleanup**: when the app disconnects (quit, crash) the helper stops that session's
+  openvpn processes and restores their DNS. Its own children PIDs are persisted so a killed helper
+  cleans up on restart.
+- Route and DNS changes go through the helper; everything is validated again there.
+
+Main uses the helper whenever it is connected (`HelperClient.launcher` for `VpnProcess`,
+`HelperClient.platform()` for route/DNS changes) and falls back to direct, unprivileged execution
+otherwise.
+
+### Credentials
+
+`CredentialStore` keeps remembered passwords as Electron `safeStorage` ciphertext (Keychain key on
+macOS, DPAPI on Windows) in `secrets.json`; it refuses to store anything when only the Linux
+"basic_text" fallback is available. A typed secret marked "Remember securely" is saved only after
+the tunnel comes up; a remembered secret rejected by the server is deleted. Importing a profile
+with `auth-user-pass <file>` moves that password to secure storage instead of copying the file.
 
 ## 8. Errors
 

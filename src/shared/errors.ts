@@ -39,7 +39,7 @@ const CATALOG: Record<VpnErrorCode, { title: string; message: string }> = {
   },
   [VpnErrorCode.PERMISSION_DENIED]: {
     title: 'Permission Denied',
-    message: 'OpenVPN needs elevated privileges to create the tunnel interface or change routes.',
+    message: 'OpenVPN needs elevated privileges to create the tunnel interface or change routes. Install the privileged helper in Settings.',
   },
   [VpnErrorCode.PROCESS_CRASHED]: {
     title: 'OpenVPN Stopped Unexpectedly',

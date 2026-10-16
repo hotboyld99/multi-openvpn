@@ -242,6 +242,18 @@ export interface AppInfo {
   arch: string;
   mockMode: boolean;
   openvpn: OpenVpnBinaryInfo | null;
+  /** OS-backed secret storage is usable ("Remember securely"). */
+  secureStorage: boolean;
+  helper: HelperStatus;
+}
+
+/**
+ * connected: openvpn, routes and DNS run through the privileged helper.
+ * not-installed / unavailable: they run as the app user (works only for configs that need no admin rights, or when the app runs as root).
+ */
+export interface HelperStatus {
+  state: 'connected' | 'not-installed' | 'unavailable' | 'mock';
+  detail?: string;
 }
 
 export type FindingSeverity = 'ok' | 'info' | 'warning' | 'danger';

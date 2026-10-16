@@ -31,9 +31,9 @@ export function registerVpnIpc(ctx: AppContext): void {
   handle(IPC.vpnGetLogs, z.tuple([IdSchema]), (id) => manager.getLogs(id));
   handle(IPC.vpnClearLogs, z.tuple([IdSchema]), (id) => manager.clearLogs(id));
 
-  handle(IPC.vpnSubmitSecret, z.tuple([IdSchema, SecretInputSchema]), async (id, secret) => {
+  handle(IPC.vpnSubmitSecret, z.tuple([IdSchema, SecretInputSchema, z.boolean()]), async (id, secret, remember) => {
     const conn = manager.get(id);
-    manager.submitSecret(id, secret);
+    manager.submitSecret(id, secret, remember && ctx.credentials.available);
     // Remember the username (not secret) as the next prefill. Passwords are never persisted here.
     const profile = conn && ctx.profiles.get(conn.profileId);
     if (profile && conn.authRequest?.needsUsername && secret.username && secret.username !== profile.username) {

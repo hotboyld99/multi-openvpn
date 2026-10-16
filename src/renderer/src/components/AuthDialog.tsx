@@ -16,6 +16,8 @@ export function AuthDialog() {
   const pending = useMemo(() => Object.values(connections).find((c) => c.authRequest), [connections]);
   const request = pending?.authRequest;
   const profile = profiles.find((p) => p.id === pending?.profileId);
+  const secureStorage = useStore((s) => s.appInfo?.secureStorage ?? false);
+  const [remember, setRemember] = useState(false);
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -26,6 +28,7 @@ export function AuthDialog() {
     setUsername(request?.username ?? '');
     setPassword('');
     setBusy(false);
+    setRemember(false);
   }, [pending?.id, request?.realm, request?.username]);
 
   if (!pending || !request) return null;
@@ -33,7 +36,7 @@ export function AuthDialog() {
   const submit = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
     setBusy(true);
-    await run(() => window.vpn.submitSecret(pending.id, { ...(request.needsUsername ? { username } : {}), password }));
+    await run(() => window.vpn.submitSecret(pending.id, { ...(request.needsUsername ? { username } : {}), password }, remember));
     setPassword('');
     setBusy(false);
   };
@@ -64,6 +67,17 @@ export function AuthDialog() {
               autoComplete="current-password"
             />
           </label>
+          {secureStorage && (
+            <label className="flex items-start gap-2 text-xs">
+              <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[var(--accent)]" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+              <span>
+                Remember securely
+                <span className="block text-muted">
+                  Stored with the {navigator.platform.startsWith('Mac') ? 'macOS Keychain' : 'OS credential store'}, only after the VPN connects.
+                </span>
+              </span>
+            </label>
+          )}
         </div>
 
         <div className="mt-5 flex justify-end gap-2">

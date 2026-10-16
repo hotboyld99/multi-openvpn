@@ -1,9 +1,13 @@
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, safeStorage, shell } from 'electron';
+import { readFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { EVENTS } from '../shared/ipc';
-import type { AppInfo, OpenVpnBinaryInfo } from '../shared/types';
+import type { AppInfo, HelperStatus, OpenVpnBinaryInfo } from '../shared/types';
+import { HelperClient } from './helper/HelperClient';
+import { defaultHelperBase } from './helper/protocol';
+import type { PlatformNetworkService } from './platform/PlatformNetworkService';
 import type { AppContext } from './context';
 import { setTrustedOrigin } from './ipc/handle';
 import { registerNetworkIpc } from './ipc/network.ipc';
@@ -11,6 +15,7 @@ import { registerProfileIpc } from './ipc/profile.ipc';
 import { registerSettingsIpc } from './ipc/settings.ipc';
 import { registerVpnIpc } from './ipc/vpn.ipc';
 import { DnsManager } from './network/DnsManager';
+import { CredentialStore } from './security/CredentialStore';
 import { RouteManager } from './network/RouteManager';
 import { createPlatformNetworkService } from './platform';
 import { demoProfiles, ProfileStore } from './store/ProfileStore';
@@ -75,7 +80,14 @@ async function bootstrap(): Promise<void> {
   });
   let openvpn: OpenVpnBinaryInfo | null = null;
 
-  const processes = new VpnProcessManager(join(app.getPath('temp'), 'multi-openvpn'));
+  const tempRoot = join(app.getPath('temp'), 'multi-openvpn');
+  const processes = new VpnProcessManager(tempRoot);
+
+  // Privileged helper: when connected, openvpn and every route/DNS change run through it.
+  const helperBase = app.isPackaged ? defaultHelperBase() : join(app.getAppPath(), '.dev-helper');
+  let helper: HelperClient | null = null;
+  let helperStatus: HelperStatus = { state: mockMode ? 'mock' : 'not-installed' };
+  let helperRetry: ReturnType<typeof setTimeout> | undefined;
   // If main dies without a graceful disconnect, do not leave orphaned openvpn processes behind;
   // if it was killed too hard for that, stop what the previous run left over now.
   process.on('exit', () => processes.killAll());
@@ -83,17 +95,39 @@ async function bootstrap(): Promise<void> {
   if (orphans.length) console.warn(`Stopped ${orphans.length} orphaned openvpn process(es): ${orphans.join(', ')}`);
 
   const createDriver: DriverFactory = (dctx) =>
-    mockMode ? new MockVpnDriver(dctx) : new OpenVpnDriver(dctx, { processes, binary: () => openvpn });
+    mockMode
+      ? new MockVpnDriver(dctx)
+      : new OpenVpnDriver(dctx, { processes, binary: () => openvpn, launcher: helper?.connected ? helper.launcher : undefined });
+  const credentials = new CredentialStore(root, {
+    isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+    isWeak: () => process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text',
+    encryptString: (s) => safeStorage.encryptString(s),
+    decryptString: (b) => safeStorage.decryptString(b),
+  });
+
   const resolveInterface = (ip: string): string | undefined =>
     Object.entries(networkInterfaces()).find(([, addrs]) => addrs?.some((a) => a.address === ip))?.[0];
-  const manager = new VpnManager({ createDriver, getProfile: (id) => profiles.get(id), resolveInterface });
+  const manager = new VpnManager({
+    createDriver,
+    getProfile: (id) => profiles.get(id),
+    resolveInterface,
+    getStoredSecret: (profileId, realm) => credentials.get(profileId, realm),
+  });
 
-  const platform = createPlatformNetworkService(join(root, 'state'));
+  const localPlatform = createPlatformNetworkService(join(root, 'state'));
+  const changes = (): PlatformNetworkService => (helper?.connected ? helper.platform(localPlatform) : localPlatform);
+  const platform: PlatformNetworkService = {
+    getRoutes: () => localPlatform.getRoutes(),
+    getCurrentDns: () => localPlatform.getCurrentDns(),
+    addRoute: (r) => changes().addRoute(r),
+    removeRoute: (r) => changes().removeRoute(r),
+    setDns: (id, d) => changes().setDns(id, d),
+    restoreDns: (id) => changes().restoreDns(id),
+    restoreAllDns: (keep) => changes().restoreAllDns(keep),
+  };
   const routes = new RouteManager(platform, { simulate: mockMode });
   const dns = new DnsManager(platform, { simulate: mockMode, reassertMs: process.platform === 'darwin' ? 15_000 : undefined });
   process.on('exit', () => dns.dispose());
-  // A previous run that crashed may have left DNS changed; undo it before anything connects.
-  await dns.recover().catch((err) => console.error('DNS recovery failed:', err.message));
 
   const appInfo = (): AppInfo => ({
     version: app.getVersion(),
@@ -101,6 +135,8 @@ async function bootstrap(): Promise<void> {
     arch: process.arch,
     mockMode,
     openvpn: mockMode ? { path: 'mock', version: '2.6.x (mock)', source: 'bundled' } : openvpn,
+    secureStorage: credentials.available,
+    helper: helperStatus,
   });
 
   const send = (channel: string, ...args: unknown[]): void => {
@@ -113,7 +149,47 @@ async function bootstrap(): Promise<void> {
   };
   await refreshBinary();
 
-  const ctx: AppContext = { manager, profiles, settings, mockMode, binaries, routes, dns, refreshBinary, appInfo, window: () => mainWindow };
+  const connectHelper = async (): Promise<void> => {
+    if (mockMode) return;
+    clearTimeout(helperRetry);
+    helper?.close();
+    helper = null;
+    try {
+      const { token, socketPath } = JSON.parse(readFileSync(join(helperBase, 'token'), 'utf8')) as { token: string; socketPath: string };
+      helper = await HelperClient.connect(socketPath, token);
+      helperStatus = { state: 'connected' };
+      helper.on('disconnected', () => {
+        helper = null;
+        helperStatus = { state: 'unavailable', detail: 'The privileged helper stopped; retrying…' };
+        send(EVENTS.appInfoChanged, appInfo());
+        helperRetry = setTimeout(() => void connectHelper(), 5_000);
+      });
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      helperStatus = e.code === 'ENOENT' && e.path?.endsWith('token') ? { state: 'not-installed' } : { state: 'unavailable', detail: e.message };
+      if (helperStatus.state === 'unavailable') helperRetry = setTimeout(() => void connectHelper(), 10_000);
+    }
+    send(EVENTS.appInfoChanged, appInfo());
+  };
+  await connectHelper();
+  // A previous run that crashed may have left DNS changed; undo it before anything connects.
+  await dns.recover().catch((err) => console.error('DNS recovery failed:', err.message));
+
+  const ctx: AppContext = {
+    manager,
+    profiles,
+    settings,
+    mockMode,
+    binaries,
+    routes,
+    dns,
+    credentials,
+    refreshBinary,
+    helperRoots: [profiles.profilesDir, tempRoot],
+    connectHelper,
+    appInfo,
+    window: () => mainWindow,
+  };
 
   const devOrigin = rendererUrl ? new URL(rendererUrl).origin : null;
   const fileUrl = pathToFileURL(rendererFile).href;
@@ -126,6 +202,18 @@ async function bootstrap(): Promise<void> {
   manager.on('connection', (c) => send(EVENTS.connection, c));
   manager.on('removed', (id) => send(EVENTS.connectionRemoved, id));
   manager.on('log', (connectionId, entry) => send(EVENTS.log, { connectionId, entry }));
+  // Remembered passwords: saved only after they worked, forgotten as soon as they are rejected.
+  manager.on('credentialsVerified', (profileId, realm, secret) => {
+    void credentials
+      .set(profileId, realm, secret)
+      .then(() => profiles.get(profileId) && profiles.update(profileId, { hasSavedPassword: true }))
+      .catch((err) => console.error('Saving credentials failed:', err.message));
+  });
+  manager.on('credentialsRejected', (profileId, realm) => {
+    void credentials
+      .remove(profileId, realm)
+      .then(async () => profiles.get(profileId) && profiles.update(profileId, { hasSavedPassword: await credentials.has(profileId) }));
+  });
   manager.on('pushesDefaultRoute', (profileId) => {
     if (profiles.get(profileId) && !profiles.get(profileId)!.pushesDefaultRoute) void profiles.update(profileId, { pushesDefaultRoute: true });
   });

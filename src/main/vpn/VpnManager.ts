@@ -44,6 +44,10 @@ interface Entry {
   holdsDefault: boolean;
   /** The server pushed redirect-gateway during the current attempt. */
   pushedDefault: boolean;
+  /** Realms answered from secure storage during the current attempt. */
+  usedStored: Set<string>;
+  /** Secrets typed with "Remember securely": saved only once the tunnel proves them right. */
+  toRemember: { realm: string; secret: SecretInput }[];
 }
 
 export class RouteConflictError extends Error {
@@ -65,6 +69,10 @@ export interface VpnManagerEvents {
   ended: [connection: VpnConnection, graceful: boolean];
   /** The server of this profile pushes redirect-gateway (remember it for conflict detection). */
   pushesDefaultRoute: [profileId: string];
+  /** A secret the user asked to remember was accepted (the tunnel came up). */
+  credentialsVerified: [profileId: string, realm: string, secret: SecretInput];
+  /** A remembered secret was rejected: it must be forgotten so the user is asked again. */
+  credentialsRejected: [profileId: string, realm: string];
 }
 
 export interface VpnManagerDeps {
@@ -72,6 +80,8 @@ export interface VpnManagerDeps {
   getProfile(id: string): VpnProfile | undefined;
   /** Finds the OS interface holding an address; fallback when openvpn did not log the tunnel name. */
   resolveInterface?(ip: string): string | undefined;
+  /** Remembered secret for a profile/realm (secure storage), tried before asking the user. */
+  getStoredSecret?(profileId: string, realm: string): Promise<SecretInput | undefined>;
 }
 
 /**
@@ -162,6 +172,8 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
       defaultRouteOverride: opts.defaultRoute,
       holdsDefault: false,
       pushedDefault: false,
+      usedStored: new Set(),
+      toRemember: [],
     };
     this.entries.set(entry.conn.id, entry);
     void this.startAttempt(entry);
@@ -227,11 +239,12 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
     if (entry) this.patch(entry, { dns });
   }
 
-  /** Answers the credential prompt of a connection. */
-  submitSecret(connectionId: string, secret: SecretInput): void {
+  /** Answers the credential prompt of a connection. With `remember`, it is saved once the tunnel is up. */
+  submitSecret(connectionId: string, secret: SecretInput, remember = false): void {
     const entry = this.require(connectionId);
     const waiter = entry.secretWaiter;
     if (!waiter) throw new Error('This connection is not waiting for credentials');
+    if (remember && entry.conn.authRequest) entry.toRemember.push({ realm: entry.conn.authRequest.realm, secret });
     this.settleSecret(entry, secret);
   }
 
@@ -244,8 +257,22 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
 
   // ---------------------------------------------------------------------------
 
-  private requestSecret(entry: Entry, generation: number, realm: string, needsUsername: boolean): Promise<SecretInput | null> {
-    if (entry.generation !== generation) return Promise.resolve(null);
+  private async requestSecret(entry: Entry, generation: number, realm: string, needsUsername: boolean): Promise<SecretInput | null> {
+    if (entry.generation !== generation) return null;
+    // A remembered secret is tried once per attempt; if openvpn asks again, it was wrong.
+    if (!entry.usedStored.has(realm)) {
+      const stored = await this.deps.getStoredSecret?.(entry.conn.profileId, realm).catch(() => undefined);
+      if (entry.generation !== generation) return null;
+      if (stored) {
+        entry.usedStored.add(realm);
+        this.log(entry, 'info', `Using saved ${realm === 'Auth' ? 'credentials' : `${realm} password`}`);
+        return stored;
+      }
+    }
+    return this.promptSecret(entry, realm, needsUsername);
+  }
+
+  private promptSecret(entry: Entry, realm: string, needsUsername: boolean): Promise<SecretInput | null> {
     this.settleSecret(entry, null); // a newer prompt replaces an unanswered one
     const profile = this.deps.getProfile(entry.conn.profileId);
     return new Promise((resolve) => {
@@ -280,6 +307,8 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
     if ('conflict' in decision) this.log(entry, 'warn', 'Another VPN owns the default route; connecting without redirect-gateway');
     entry.holdsDefault = defaultRoute === 'take';
     entry.pushedDefault = false;
+    entry.usedStored = new Set();
+    entry.toRemember = [];
 
     entry.stopping = false;
     entry.pendingError = undefined;
@@ -365,7 +394,10 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
           }
         }
         this.patch(entry, patch);
-        if (status === 'CONNECTED') this.emit('connected', { ...entry.conn });
+        if (status === 'CONNECTED') {
+          for (const r of entry.toRemember.splice(0)) this.emit('credentialsVerified', entry.conn.profileId, r.realm, r.secret);
+          this.emit('connected', { ...entry.conn });
+        }
         return;
       }
 
@@ -418,6 +450,11 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
         }
         entry.pendingError = event.error;
         this.patch(entry, { error: event.error });
+        if (event.error.code === VpnErrorCode.AUTH_FAILED) {
+          for (const realm of entry.usedStored) this.emit('credentialsRejected', entry.conn.profileId, realm);
+          entry.usedStored.clear();
+          entry.toRemember = [];
+        }
         this.log(entry, 'error', `${event.error.title}: ${event.error.detail ?? event.error.message}`);
         // openvpn would keep retrying a wrong password or an expired cert forever; stop it now.
         if (!isRetryable(event.error.code) && entry.driver && !entry.stopping) void entry.driver.stop();

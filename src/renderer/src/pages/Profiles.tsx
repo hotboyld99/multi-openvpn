@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Copy, Download, Ellipsis, Eye, FileCode, FileText, FileUp, Pencil, Power, RefreshCw, Rocket, Search, Settings2, Trash2, Unplug } from 'lucide-react';
+import { Copy, Download, Ellipsis, Eye, FileCode, FileText, FileUp, KeyRound, Pencil, Power, RefreshCw, Rocket, Search, Settings2, Trash2, Unplug } from 'lucide-react';
 import { isLive, type VpnProfile } from '../../../shared/types';
 import { ErrorPanel } from '../components/ConnectionCard';
 import { Button, Card, EmptyState, Input, Menu, PageHeader, Pill, StatusBadge } from '../components/ui';
@@ -58,6 +58,7 @@ function ProfileRow({ profile, selected, onSelect }: { profile: VpnProfile; sele
           <div className="flex items-center gap-1.5 truncate text-xs text-muted">
             {profile.configFileName}
             {profile.routingMode === 'custom' && <Pill>split tunnel</Pill>}
+            {profile.hasSavedPassword && <Pill>password saved</Pill>}
             {profile.routingMode === 'config' && profile.ignoreRedirectGateway && <Pill>no default route</Pill>}
           </div>
         </div>
@@ -115,6 +116,15 @@ function ProfileRow({ profile, selected, onSelect }: { profile: VpnProfile; sele
               checked: profile.autoConnect,
               onSelect: () => void run(() => window.vpn.profiles.update(profile.id, { autoConnect: !profile.autoConnect })),
             },
+            ...(profile.hasSavedPassword
+              ? [
+                  {
+                    label: 'Forget saved password',
+                    icon: <KeyRound className="h-3.5 w-3.5" />,
+                    onSelect: () => void run(() => window.vpn.profiles.forgetCredentials(profile.id)),
+                  },
+                ]
+              : []),
             { label: 'Delete', icon: <Trash2 className="h-3.5 w-3.5" />, danger: true, onSelect: () => void remove() },
           ]}
         />

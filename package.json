@@ -13,7 +13,8 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "helper:dev": "node scripts/dev-helper.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.57.0",

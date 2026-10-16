@@ -25,6 +25,12 @@ export function registerProfileIpc(ctx: AppContext): void {
   handle(IPC.profilesRemove, z.tuple([IdSchema]), async (id) => {
     await manager.removeProfile(id); // never leave an openvpn process behind for a deleted profile
     await profiles.remove(id);
+    await ctx.credentials.remove(id);
+  });
+
+  handle(IPC.profilesForgetCredentials, z.tuple([IdSchema]), async (id) => {
+    await ctx.credentials.remove(id);
+    await profiles.update(id, { hasSavedPassword: false });
   });
 
   handle(IPC.profilesPickFiles, z.tuple([]), async () => {
@@ -45,7 +51,12 @@ export function registerProfileIpc(ctx: AppContext): void {
     const failures: string[] = [];
     for (const req of requests) {
       try {
-        imported.push(await profiles.add(await importProfile(req, profiles.profilesDir)));
+        const store = async (id: string, secret: { username?: string; password: string }): Promise<boolean> => {
+          if (!ctx.credentials.available) return false;
+          await ctx.credentials.set(id, 'Auth', secret);
+          return true;
+        };
+        imported.push(await profiles.add(await importProfile(req, profiles.profilesDir, store)));
       } catch (err) {
         failures.push((err as Error).message);
       }

@@ -32,7 +32,7 @@ export function ErrorPanel({ connection, actions = false }: { connection: VpnCon
       {actions && connection.status === 'ERROR' && (
         <div className="mt-2 flex gap-2">
           <Button size="sm" onClick={() => run(() => window.vpn.reconnect(connection.id))}>
-            <RotateCw className="h-3.5 w-3.5" /> {error.code === 'AUTH_FAILED' ? 'Retry / Edit Credentials' : 'Retry'}
+            <RotateCw className="h-3.5 w-3.5" /> {error.code === 'AUTH_FAILED' ? 'Edit Credentials' : 'Retry'}
           </Button>
           <Button size="sm" variant="ghost" onClick={() => navigate('logs', connection.id)}>
             <ScrollText className="h-3.5 w-3.5" /> View Logs

@@ -24,7 +24,7 @@ const api: VpnApi = {
   getLogs: (connectionId) => invoke(IPC.vpnGetLogs, connectionId),
   clearLogs: (connectionId) => invoke(IPC.vpnClearLogs, connectionId),
   exportLogs: (connectionId) => invoke(IPC.vpnExportLogs, connectionId),
-  submitSecret: (connectionId, secret) => invoke(IPC.vpnSubmitSecret, connectionId, secret),
+  submitSecret: (connectionId, secret, remember) => invoke(IPC.vpnSubmitSecret, connectionId, secret, remember),
   cancelSecret: (connectionId) => invoke(IPC.vpnCancelSecret, connectionId),
   onConnection: (cb) => subscribe(EVENTS.connection, cb),
   onConnectionRemoved: (cb) => subscribe(EVENTS.connectionRemoved, cb),
@@ -44,6 +44,7 @@ const api: VpnApi = {
     checkConfig: (id, text) => invoke(IPC.profilesCheckConfig, id, text),
     writeConfig: (id, text, acceptDangerous) => invoke(IPC.profilesWriteConfig, id, text, acceptDangerous),
     exportConfig: (id) => invoke(IPC.profilesExport, id),
+    forgetCredentials: (id) => invoke(IPC.profilesForgetCredentials, id),
   },
 
   network: {
@@ -56,6 +57,11 @@ const api: VpnApi = {
     get: () => invoke(IPC.settingsGet),
     update: (patch) => invoke(IPC.settingsUpdate, patch),
     onChanged: (cb) => subscribe(EVENTS.settingsChanged, cb),
+  },
+
+  helper: {
+    install: () => invoke(IPC.helperInstall),
+    uninstall: () => invoke(IPC.helperUninstall),
   },
 
   openvpn: {

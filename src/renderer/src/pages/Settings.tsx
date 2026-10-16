@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { FolderOpen, Monitor, Moon, ScanSearch, Sun } from 'lucide-react';
+import { FolderOpen, Monitor, Moon, ScanSearch, ShieldCheck, ShieldAlert, Sun } from 'lucide-react';
 import type { OpenVpnBinaryInfo, ThemeSetting } from '../../../shared/types';
 import { Button, Card, PageHeader, Pill } from '../components/ui';
 import { cn } from '../lib/format';
@@ -82,6 +82,53 @@ function OpenVpnBinary({ custom, mock }: { custom: string | null; mock: boolean 
   );
 }
 
+function PrivilegedHelper() {
+  const info = useStore((s) => s.appInfo);
+  const [busy, setBusy] = useState(false);
+  if (!info) return null;
+  const { helper } = info;
+  const act = async (fn: () => Promise<void>): Promise<void> => {
+    setBusy(true);
+    await run(fn);
+    setBusy(false);
+  };
+  return (
+    <div className="flex flex-col gap-3 text-xs">
+      <div className="flex items-center gap-2">
+        {helper.state === 'connected' ? (
+          <ShieldCheck className="h-4 w-4 text-emerald-500" />
+        ) : (
+          <ShieldAlert className="h-4 w-4 text-amber-500" />
+        )}
+        <span className="font-medium">
+          {helper.state === 'connected' && 'Installed and running'}
+          {helper.state === 'not-installed' && 'Not installed'}
+          {helper.state === 'unavailable' && 'Installed but not reachable'}
+          {helper.state === 'mock' && 'Not used in mock mode'}
+        </span>
+        {helper.detail && <span className="text-muted">— {helper.detail}</span>}
+      </div>
+      <p className="text-muted">
+        OpenVPN needs administrator rights to create tunnel interfaces, routes and DNS settings. The app itself always runs as your user;
+        only the helper runs privileged, accepts a fixed set of validated operations, runs only the approved OpenVPN binary and never
+        runs scripts from profiles.
+      </p>
+      {helper.state !== 'mock' && (
+        <div className="flex gap-2">
+          <Button size="sm" variant="primary" disabled={busy} onClick={() => act(() => window.vpn.helper.install())}>
+            {helper.state === 'not-installed' ? 'Install helper…' : 'Reinstall helper…'}
+          </Button>
+          {helper.state !== 'not-installed' && (
+            <Button size="sm" disabled={busy} onClick={() => act(() => window.vpn.helper.uninstall())}>
+              Uninstall
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Settings() {
   const settings = useStore((s) => s.settings);
   const appInfo = useStore((s) => s.appInfo);
@@ -111,6 +158,10 @@ export function Settings() {
 
         <Section title="OpenVPN binary">
           <OpenVpnBinary custom={settings.openvpnPath} mock={appInfo.mockMode} />
+        </Section>
+
+        <Section title="Privileged helper">
+          <PrivilegedHelper />
         </Section>
 
         <Section title="About">

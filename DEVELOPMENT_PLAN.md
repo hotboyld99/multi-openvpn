@@ -34,7 +34,8 @@ short report (Completed / Changed files / Decisions / How to test / Limitations 
 | 5 Multi VPN | done |
 | 6 Routing | done |
 | 7 DNS | done |
-| 8–9 | pending |
+| 8 Security | done |
+| 9 Production | pending |
 
 ## Testing real OpenVPN without root
 

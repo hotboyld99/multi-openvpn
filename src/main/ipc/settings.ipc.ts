@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { IPC } from '../../shared/ipc';
 import { SettingsPatchSchema } from '../../shared/schemas';
 import type { AppContext } from '../context';
+import { installHelper, uninstallHelper } from '../helper/install';
 import { handle } from './handle';
 
 export function registerSettingsIpc(ctx: AppContext): void {
@@ -15,6 +16,19 @@ export function registerSettingsIpc(ctx: AppContext): void {
     const next = await settings.update(patch);
     if ('openvpnPath' in patch) await ctx.refreshBinary();
     return next;
+  });
+
+  handle(IPC.helperInstall, z.tuple([]), async () => {
+    const bin = ctx.appInfo().openvpn;
+    if (!bin || ctx.mockMode) throw new Error('Select a valid OpenVPN binary first');
+    await installHelper({ execPath: process.execPath, allowedRoots: ctx.helperRoots, binaries: [bin.path] });
+    await new Promise((r) => setTimeout(r, 1_000)); // launchd starts it
+    await ctx.connectHelper();
+  });
+  handle(IPC.helperUninstall, z.tuple([]), async () => {
+    if (ctx.manager.activeCount() > 0) throw new Error('Disconnect all VPNs before removing the helper');
+    await uninstallHelper();
+    await ctx.connectHelper();
   });
 
   handle(IPC.openvpnDetect, z.tuple([]), async () => ({

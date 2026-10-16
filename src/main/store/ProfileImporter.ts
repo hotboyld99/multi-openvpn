@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
-import type { ImportPreview, ProfileScan, VpnProfile } from '../../shared/types';
+import type { ImportPreview, ProfileScan, SecretInput, VpnProfile } from '../../shared/types';
 import { scanConfig, UNSUPPORTED_DIRECTIVES } from '../security/ConfigSecurityScanner';
 import {
   analyzeConfig,
@@ -63,7 +63,7 @@ export async function previewImport(path: string): Promise<ImportPreview> {
       scan.findings.push({
         severity: 'info',
         title: 'Credentials file not imported',
-        detail: 'The username is kept; the password will be asked for when connecting (it is never stored in plaintext).',
+        detail: 'The file is not copied. The username is kept and the password is moved to the OS secure storage (or asked for when connecting).',
       });
     }
     return { path, fileName, suggestedName, scan };
@@ -92,7 +92,12 @@ export interface ImportRequest {
  * Copies a config and all files it references into <profilesDir>/<id>/, rewriting the
  * references to local names so the profile is self-contained and relative paths keep working.
  */
-export async function importProfile(req: ImportRequest, profilesDir: string): Promise<VpnProfile> {
+export async function importProfile(
+  req: ImportRequest,
+  profilesDir: string,
+  /** Puts the password of an auth-user-pass file into secure storage; resolves false if it cannot. */
+  storeCredentials?: (profileId: string, secret: SecretInput) => Promise<boolean>,
+): Promise<VpnProfile> {
   const preview = await previewImport(req.path);
   if (preview.scan.errors.length) throw new Error(`${preview.fileName}: ${preview.scan.errors.join('; ')}`);
   if (preview.scan.dangerous && !req.acceptDangerous) throw new Error(`${preview.fileName} can execute local commands; confirmation required`);
@@ -102,6 +107,7 @@ export async function importProfile(req: ImportRequest, profilesDir: string): Pr
   const dir = join(profilesDir, id);
   await mkdir(dir, { recursive: true, mode: 0o700 });
   let username: string | undefined;
+  let password: string | undefined;
 
   try {
     const taken = new Set(['config.ovpn']);
@@ -111,7 +117,9 @@ export async function importProfile(req: ImportRequest, profilesDir: string): Pr
       if (CREDENTIAL_FILE_DIRECTIVES.has(ref.directive.name)) {
         if (ref.directive.name === 'auth-user-pass') {
           const text = await readSmallFile(resolveRef(dirname(req.path), ref)).then((b) => b.toString('utf8')).catch(() => '');
-          username = text.split(/\r?\n/)[0]?.trim() || undefined;
+          const [user, pass] = text.split(/\r?\n/);
+          username = user?.trim() || undefined;
+          password = pass || undefined;
         }
         args.splice(ref.argIndex, 1); // management will ask instead
         setArgs(ref.directive, args);
@@ -131,6 +139,8 @@ export async function importProfile(req: ImportRequest, profilesDir: string): Pr
 
     const configPath = join(dir, 'config.ovpn');
     await writeFile(configPath, serializeConfig(cfg), { mode: 0o600 });
+    // The plaintext password file is never copied; its password goes to secure storage (if available).
+    const hasSavedPassword = !!(username && password && (await storeCredentials?.(id, { username, password }).catch(() => false)));
     const now = Date.now();
     return {
       id,
@@ -138,7 +148,7 @@ export async function importProfile(req: ImportRequest, profilesDir: string): Pr
       configPath,
       configFileName: preview.fileName,
       username,
-      hasSavedPassword: false,
+      hasSavedPassword,
       autoConnect: false,
       reconnect: true,
       routingMode: 'config',

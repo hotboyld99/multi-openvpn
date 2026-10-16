@@ -42,6 +42,7 @@ export const IPC = {
   profilesCheckConfig: 'profiles:checkConfig',
   profilesWriteConfig: 'profiles:writeConfig',
   profilesExport: 'profiles:export',
+  profilesForgetCredentials: 'profiles:forgetCredentials',
 
   networkGetInterfaces: 'network:getInterfaces',
   networkGetRoutes: 'network:getRoutes',
@@ -49,6 +50,9 @@ export const IPC = {
 
   settingsGet: 'settings:get',
   settingsUpdate: 'settings:update',
+
+  helperInstall: 'helper:install',
+  helperUninstall: 'helper:uninstall',
 
   openvpnDetect: 'openvpn:detect',
   openvpnBrowse: 'openvpn:browse',
@@ -88,7 +92,7 @@ export interface VpnApi {
   /** Opens a save dialog in main; resolves false when the user cancels. */
   exportLogs(connectionId: string): Promise<boolean>;
   /** Answers `connection.authRequest`. The secret goes to openvpn's management socket only. */
-  submitSecret(connectionId: string, secret: SecretInput): Promise<void>;
+  submitSecret(connectionId: string, secret: SecretInput, remember: boolean): Promise<void>;
   /** Dismisses the prompt and disconnects. */
   cancelSecret(connectionId: string): Promise<void>;
   onConnection(cb: (connection: VpnConnection) => void): Unsubscribe;
@@ -114,6 +118,8 @@ export interface VpnApi {
     writeConfig(id: string, text: string, acceptDangerous: boolean): Promise<ProfileScan>;
     /** Save dialog → single self-contained .ovpn with inline certificates. */
     exportConfig(id: string): Promise<boolean>;
+    /** Deletes saved passwords of the profile from secure storage. */
+    forgetCredentials(id: string): Promise<void>;
   };
 
   network: {
@@ -127,6 +133,12 @@ export interface VpnApi {
     get(): Promise<AppSettings>;
     update(patch: SettingsPatch): Promise<AppSettings>;
     onChanged(cb: (settings: AppSettings) => void): Unsubscribe;
+  };
+
+  helper: {
+    /** Installs the privileged helper (macOS administrator prompt). */
+    install(): Promise<void>;
+    uninstall(): Promise<void>;
   };
 
   openvpn: {
