@@ -1,8 +1,8 @@
 import { ArrowDown, ArrowUp, Power, RotateCw, ScrollText, TriangleAlert } from 'lucide-react';
 import { isLive, type VpnConnection, type VpnProfile } from '../../../shared/types';
 import { formatBytes, formatDuration, formatRate } from '../lib/format';
-import { navigate, run, useNow } from '../store';
-import { Button, Card, StatusBadge } from './ui';
+import { navigate, run, useNow, connectProfile } from '../store';
+import { Button, Card, Pill, StatusBadge } from './ui';
 
 function Row({ label, value }: { label: string; value?: string | number }) {
   return (
@@ -60,6 +60,14 @@ export function ConnectionCard({ connection, profile }: { connection: VpnConnect
         {connection.pid && <span className="font-mono text-[11px] text-muted">PID {connection.pid}</span>}
       </div>
 
+      {(connection.ownsDefaultRoute || connection.ignoredDefaultRoute || connection.appliedRoutes) && (
+        <div className="flex flex-wrap gap-1">
+          {connection.ownsDefaultRoute && <Pill className="border-accent/40 text-accent">Default route</Pill>}
+          {connection.ignoredDefaultRoute && <Pill title="The server asked to route all traffic; another VPN owns the default route">Default route ignored</Pill>}
+          {connection.appliedRoutes && <Pill title={connection.appliedRoutes.join('\n')}>Split tunnel · {connection.appliedRoutes.length} routes</Pill>}
+        </div>
+      )}
+
       <div className="flex flex-col gap-1">
         <Row label="VPN IP" value={connection.assignedIp} />
         <Row label="Interface" value={connection.interfaceName} />
@@ -110,7 +118,7 @@ export function ConnectionCard({ connection, profile }: { connection: VpnConnect
               <Power className="h-3.5 w-3.5" /> Disconnect
             </Button>
           ) : connection.status === 'ERROR' ? null : (
-            <Button size="sm" variant="primary" onClick={() => run(() => window.vpn.connect(connection.profileId))}>
+            <Button size="sm" variant="primary" onClick={() => connectProfile(connection.profileId)}>
               <Power className="h-3.5 w-3.5" /> Connect
             </Button>
           )}

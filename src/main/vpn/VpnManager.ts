@@ -4,6 +4,7 @@ import { isRetryable, vpnError } from '../../shared/errors';
 import {
   isLive,
   VpnErrorCode,
+  type ConnectOptions,
   type LogEntry,
   type LogLevel,
   type SecretInput,
@@ -11,6 +12,7 @@ import {
   type VpnError,
   type VpnProfile,
 } from '../../shared/types';
+import { decideDefaultRoute } from '../network/routingPolicy';
 import { mapOpenVpnState, VpnDriverError, type DriverEvent, type DriverFactory, type VpnDriver } from './VpnDriver';
 
 /** Automatic reconnect delays; the last value repeats. */
@@ -36,6 +38,22 @@ interface Entry {
   baseIn: number;
   baseOut: number;
   lastBytesAt?: number;
+  /** Default-route choice made by the user for this connection; survives automatic reconnects. */
+  defaultRouteOverride?: 'take' | 'skip';
+  /** Reserves the default route while connecting, so two VPNs started together cannot both take it. */
+  holdsDefault: boolean;
+  /** The server pushed redirect-gateway during the current attempt. */
+  pushedDefault: boolean;
+}
+
+export class RouteConflictError extends Error {
+  constructor(
+    readonly profileId: string,
+    readonly holderConnectionId: string,
+    readonly holderProfileId: string,
+  ) {
+    super('Another VPN already owns the default route');
+  }
 }
 
 export interface VpnManagerEvents {
@@ -43,6 +61,10 @@ export interface VpnManagerEvents {
   removed: [connectionId: string];
   log: [connectionId: string, entry: LogEntry];
   connected: [VpnConnection];
+  /** A process of this connection ended; `graceful` = asked to stop (openvpn cleaned up itself). */
+  ended: [connection: VpnConnection, graceful: boolean];
+  /** The server of this profile pushes redirect-gateway (remember it for conflict detection). */
+  pushesDefaultRoute: [profileId: string];
 }
 
 export interface VpnManagerDeps {
@@ -86,12 +108,37 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
     return [...this.entries.values()].filter((e) => isLive(e.conn.status)).length;
   }
 
-  /** Starts a connection for the profile, or returns the live one it already has. */
-  connect(profileId: string): string {
-    if (!this.deps.getProfile(profileId)) throw new Error(`Profile ${profileId} not found`);
+  /** The live connection holding (or reserving) the default route, if any. */
+  defaultRouteHolder(except?: string): VpnConnection | undefined {
+    for (const e of this.entries.values()) {
+      if (e.conn.id !== except && e.holdsDefault && isLive(e.conn.status)) return { ...e.conn };
+    }
+    return undefined;
+  }
+
+  /**
+   * Starts a connection for the profile, or returns the live one it already has.
+   * Throws RouteConflictError when the profile wants the default route that another VPN owns
+   * and no choice was given; the UI then asks the user and calls again with `opts`.
+   */
+  connect(profileId: string, opts: ConnectOptions = {}): string {
+    const profile = this.deps.getProfile(profileId);
+    if (!profile) throw new Error(`Profile ${profileId} not found`);
 
     const previous = this.findByProfile(profileId);
     if (previous && isLive(previous.conn.status)) return previous.conn.id;
+
+    const holder = this.defaultRouteHolder();
+    const decision = decideDefaultRoute({ profile, holderExists: !!holder, choice: opts.defaultRoute });
+    if ('conflict' in decision) throw new RouteConflictError(profileId, holder!.id, holder!.profileId);
+    if (holder && decision.defaultRoute === 'take' && opts.replaceDefault) {
+      // Move the current owner off the default route; it reconnects with redirect-gateway filtered.
+      const h = this.entries.get(holder.id)!;
+      h.defaultRouteOverride = 'skip';
+      h.holdsDefault = false;
+      this.log(h, 'info', 'Default route handed over to another VPN; reconnecting without it');
+      void this.reconnect(holder.id);
+    }
     if (previous) this.drop(previous);
 
     const entry: Entry = {
@@ -112,6 +159,9 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
       attempt: 0,
       baseIn: 0,
       baseOut: 0,
+      defaultRouteOverride: opts.defaultRoute,
+      holdsDefault: false,
+      pushedDefault: false,
     };
     this.entries.set(entry.conn.id, entry);
     void this.startAttempt(entry);
@@ -207,6 +257,18 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
       return;
     }
 
+    // Re-evaluated on every attempt: another VPN may have taken the default route meanwhile.
+    // Automatic attempts never block on a dialog: if it would conflict, connect without it.
+    const decision = decideDefaultRoute({
+      profile,
+      holderExists: !!this.defaultRouteHolder(entry.conn.id),
+      choice: entry.defaultRouteOverride,
+    });
+    const defaultRoute = 'conflict' in decision ? 'skip' : decision.defaultRoute;
+    if ('conflict' in decision) this.log(entry, 'warn', 'Another VPN owns the default route; connecting without redirect-gateway');
+    entry.holdsDefault = defaultRoute === 'take';
+    entry.pushedDefault = false;
+
     entry.stopping = false;
     entry.pendingError = undefined;
     entry.baseIn = entry.conn.bytesIn;
@@ -220,6 +282,7 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
         if (entry.generation === generation) this.onDriverEvent(entry, event);
       },
       requestSecret: (req) => this.requestSecret(entry, generation, req.realm, req.needsUsername),
+      routing: { defaultRoute },
     });
     entry.driver = driver;
     this.patch(entry, {
@@ -234,6 +297,9 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
       error: undefined,
       rateIn: 0,
       rateOut: 0,
+      defaultRoute,
+      ownsDefaultRoute: false,
+      ignoredDefaultRoute: false,
     });
 
     try {
@@ -244,6 +310,7 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
     } catch (err) {
       if (entry.generation !== generation) return;
       entry.driver = undefined;
+      entry.holdsDefault = false;
       const error = err instanceof VpnDriverError ? err.vpnError : vpnError(VpnErrorCode.UNKNOWN, String(err));
       this.log(entry, 'error', `${error.title}: ${error.detail ?? error.message}`);
       this.fail(entry, error);
@@ -277,6 +344,11 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
           entry.attempt = 0;
           patch.connectedAt = Date.now();
           patch.error = undefined;
+          if (entry.holdsDefault) {
+            const wants = !!this.deps.getProfile(entry.conn.profileId)?.wantsDefaultRoute || entry.pushedDefault;
+            entry.holdsDefault = wants; // nothing redirected: free the reservation for other VPNs
+            patch.ownsDefaultRoute = wants;
+          }
         }
         this.patch(entry, patch);
         if (status === 'CONNECTED') this.emit('connected', { ...entry.conn });
@@ -302,7 +374,16 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
         this.patch(entry, {
           ...(event.interfaceName ? { interfaceName: event.interfaceName } : {}),
           ...(event.gateway ? { gateway: event.gateway } : {}),
+          ...(event.appliedRoutes ? { appliedRoutes: event.appliedRoutes } : {}),
         });
+        if (event.pushedDefaultRoute) {
+          entry.pushedDefault = true;
+          this.emit('pushesDefaultRoute', entry.conn.profileId);
+          if (entry.conn.defaultRoute === 'skip') {
+            this.patch(entry, { ignoredDefaultRoute: true });
+            this.log(entry, 'warn', 'The server pushed redirect-gateway; ignored because another VPN owns the default route');
+          }
+        }
         return;
 
       case 'error':
@@ -321,7 +402,10 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
 
       case 'exit': {
         entry.driver = undefined;
+        entry.holdsDefault = false;
         this.settleSecret(entry, null);
+        this.emit('ended', { ...entry.conn }, entry.stopping);
+        this.patch(entry, { ownsDefaultRoute: false });
         if (entry.stopping) {
           this.finishStopped(entry);
           return;

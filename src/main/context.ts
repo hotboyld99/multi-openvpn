@@ -1,5 +1,6 @@
 import type { BrowserWindow } from 'electron';
 import type { AppInfo } from '../shared/types';
+import type { RouteManager } from './network/RouteManager';
 import type { ProfileStore } from './store/ProfileStore';
 import type { SettingsStore } from './store/SettingsStore';
 import type { OpenVpnBinaryManager } from './vpn/OpenVpnBinaryManager';
@@ -12,6 +13,7 @@ export interface AppContext {
   settings: SettingsStore;
   mockMode: boolean;
   binaries: OpenVpnBinaryManager;
+  routes: RouteManager;
   /** Re-resolves the OpenVPN binary from settings and notifies the renderer. */
   refreshBinary(): Promise<void>;
   appInfo(): AppInfo;

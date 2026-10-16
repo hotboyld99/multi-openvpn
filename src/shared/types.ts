@@ -81,6 +81,12 @@ export interface VpnProfile {
   customRoutes?: RouteRule[];
   dnsMode: DnsMode;
   dnsServers?: string[];
+  /** Never let this VPN take the default route, even if its config or server asks for it. */
+  ignoreRedirectGateway?: boolean;
+  /** The config file contains redirect-gateway (computed at import/edit). */
+  wantsDefaultRoute?: boolean;
+  /** The server pushed redirect-gateway on a previous connection (learned). */
+  pushesDefaultRoute?: boolean;
   lastConnectedAt?: number;
   createdAt: number;
   updatedAt: number;
@@ -126,6 +132,44 @@ export interface VpnConnection {
   error?: VpnError;
   /** Set while the UI must ask the user for credentials. */
   authRequest?: AuthRequest;
+  /** take = may install the default route; skip = redirect-gateway is filtered out. */
+  defaultRoute?: 'take' | 'skip';
+  /** This connection currently routes all traffic (owns 0.0.0.0/0). */
+  ownsDefaultRoute?: boolean;
+  /** The server pushed redirect-gateway but it was filtered because another VPN owns the default route. */
+  ignoredDefaultRoute?: boolean;
+  /** Custom routes actually requested from openvpn (hostnames resolved). */
+  appliedRoutes?: string[];
+}
+
+/** Another VPN already owns (or is acquiring) the default route. */
+export interface RouteConflict {
+  profileId: string;
+  holderConnectionId: string;
+  holderProfileId: string;
+}
+
+export type ConnectResult = { connectionId: string } | { conflict: RouteConflict };
+
+export interface ConnectOptions {
+  /** Resolution chosen in the Route Conflict dialog. */
+  defaultRoute?: 'take' | 'skip';
+  /** With defaultRoute 'take': first move the current owner off the default route. */
+  replaceDefault?: boolean;
+}
+
+export interface RouteInfo {
+  destination: string;
+  gateway: string;
+  interface: string;
+  family: 'IPv4' | 'IPv6';
+  /** Default route or one of the halves openvpn uses for def1 (0/1, 128/1). */
+  isDefault: boolean;
+  connectionId?: string;
+  profileId?: string;
+  /** Same destination installed by more than one VPN. */
+  conflict?: boolean;
+  simulated?: boolean;
 }
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';

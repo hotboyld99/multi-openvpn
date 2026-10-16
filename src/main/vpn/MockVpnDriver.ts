@@ -7,9 +7,10 @@ import type { DriverContext, VpnDriver } from './VpnDriver';
  * generates traffic, so the whole app (VpnManager, IPC, UI) runs without a server.
  *
  * Demo profiles pick a scenario through their config path: mock://ok, mock://auth (asks for
- * username/password; password "wrong" fails), mock://auth-fail, mock://flaky.
+ * username/password; password "wrong" fails), mock://default (server pushes redirect-gateway),
+ * mock://auth-fail, mock://flaky.
  */
-export type MockScenario = 'ok' | 'auth' | 'auth-fail' | 'flaky';
+export type MockScenario = 'ok' | 'default' | 'auth' | 'auth-fail' | 'flaky';
 
 let nextPid = 41_000;
 // Prefixed so a mock tunnel can never be mistaken for a real utunN of the OS.
@@ -17,7 +18,7 @@ let nextUtun = 0;
 let nextPort = 25_100;
 
 export const scenarioOf = (configPath: string): MockScenario => {
-  const m = /^mock:\/\/(ok|auth|auth-fail|flaky)$/.exec(configPath);
+  const m = /^mock:\/\/(ok|default|auth|auth-fail|flaky)$/.exec(configPath);
   return (m?.[1] as MockScenario | undefined) ?? 'ok';
 };
 
@@ -95,7 +96,18 @@ export class MockVpnDriver implements VpnDriver {
 
   private connectUp(t: number, ip: string, gateway: string, remote: string, utun: string, subnet: number): void {
     const { emit } = this.ctx;
-    this.at(t, () => emit({ type: 'state', state: 'GET_CONFIG' }));
+    this.at(t, () => {
+      emit({ type: 'state', state: 'GET_CONFIG' });
+      if (this.scenario === 'default') {
+        emit({ type: 'log', level: 'info', message: `PUSH: Received control message: 'PUSH_REPLY,redirect-gateway def1,route-gateway ${gateway}'` });
+        emit({ type: 'netinfo', pushedDefaultRoute: true });
+      }
+      const { profile, routing } = this.ctx;
+      if (routing.defaultRoute === 'skip') emit({ type: 'log', level: 'info', message: 'Routing policy: default route not taken' });
+      if (profile.routingMode === 'custom') {
+        emit({ type: 'netinfo', appliedRoutes: (profile.customRoutes ?? []).filter((r) => r.type !== 'hostname').map((r) => (r.value.includes('/') ? r.value : `${r.value}/32`)) });
+      }
+    });
     this.at(t + 300, () => {
       emit({ type: 'log', level: 'info', message: `Opened utun device ${utun}` });
       emit({ type: 'netinfo', interfaceName: utun });

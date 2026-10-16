@@ -45,7 +45,10 @@ export class ProfileStore extends EventEmitter<{ changed: [VpnProfile[]] }> {
     return profile;
   }
 
-  async update(id: string, patch: ProfilePatch & { lastConnectedAt?: number; hasSavedPassword?: boolean }): Promise<VpnProfile> {
+  async update(
+    id: string,
+    patch: ProfilePatch & Partial<Pick<VpnProfile, 'lastConnectedAt' | 'hasSavedPassword' | 'wantsDefaultRoute' | 'pushesDefaultRoute'>>,
+  ): Promise<VpnProfile> {
     const current = this.require(id);
     const next: VpnProfile = { ...current, ...patch, updatedAt: Date.now() };
     this.profiles.set(id, next);
@@ -119,8 +122,8 @@ export function demoProfiles(): VpnProfile[] {
     ...extra,
   });
   return [
-    make('Company Singapore', 'ok'),
-    make('Development VPN', 'ok'),
+    make('Company Singapore', 'default'),
+    make('Development VPN', 'ok', { wantsDefaultRoute: true }),
     make('Office VPN', 'auth', { username: 'alice' }),
     make('Staging', 'flaky'),
     make('Broken Auth', 'auth-fail'),

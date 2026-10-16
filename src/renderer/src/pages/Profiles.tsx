@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
-import { Copy, Download, Ellipsis, Eye, FileCode, FileText, FileUp, Pencil, Power, RefreshCw, Rocket, Search, Trash2, Unplug } from 'lucide-react';
+import { Copy, Download, Ellipsis, Eye, FileCode, FileText, FileUp, Pencil, Power, RefreshCw, Rocket, Search, Settings2, Trash2, Unplug } from 'lucide-react';
 import { isLive, type VpnProfile } from '../../../shared/types';
 import { ErrorPanel } from '../components/ConnectionCard';
-import { Button, Card, EmptyState, Input, Menu, PageHeader, StatusBadge } from '../components/ui';
+import { Button, Card, EmptyState, Input, Menu, PageHeader, Pill, StatusBadge } from '../components/ui';
 import { cn, timeAgo } from '../lib/format';
-import { connectionOf, openConfig, run, startImport, useNow, useStore } from '../store';
+import { connectionOf, connectProfile, connectProfiles, openConfig, openProfileSettings, run, startImport, useNow, useStore } from '../store';
 
 function ProfileRow({ profile, selected, onSelect }: { profile: VpnProfile; selected: boolean; onSelect: (v: boolean) => void }) {
   const connections = useStore((s) => s.connections);
@@ -55,7 +55,11 @@ function ProfileRow({ profile, selected, onSelect }: { profile: VpnProfile; sele
           ) : (
             <div className="truncate font-semibold">{profile.name}</div>
           )}
-          <div className="truncate text-xs text-muted">{profile.configFileName}</div>
+          <div className="flex items-center gap-1.5 truncate text-xs text-muted">
+            {profile.configFileName}
+            {profile.routingMode === 'custom' && <Pill>split tunnel</Pill>}
+            {profile.routingMode === 'config' && profile.ignoreRedirectGateway && <Pill>no default route</Pill>}
+          </div>
         </div>
 
         <div className="w-44 text-right text-xs">
@@ -73,7 +77,7 @@ function ProfileRow({ profile, selected, onSelect }: { profile: VpnProfile; sele
             <Unplug className="h-3.5 w-3.5" /> Disconnect
           </Button>
         ) : (
-          <Button size="sm" variant="primary" onClick={() => run(() => window.vpn.connect(profile.id))}>
+          <Button size="sm" variant="primary" onClick={() => connectProfile(profile.id)}>
             <Power className="h-3.5 w-3.5" /> Connect
           </Button>
         )}
@@ -86,6 +90,7 @@ function ProfileRow({ profile, selected, onSelect }: { profile: VpnProfile; sele
           }
           items={[
             { label: 'Rename', icon: <Pencil className="h-3.5 w-3.5" />, onSelect: () => setEditing(true) },
+            { label: 'Routing & DNS…', icon: <Settings2 className="h-3.5 w-3.5" />, onSelect: () => openProfileSettings(profile.id) },
             ...(profile.configPath.startsWith('mock://')
               ? []
               : [
@@ -182,7 +187,7 @@ export function Profiles() {
             />
             Select all
           </label>
-          <Button variant="primary" disabled={selectedIds.length === 0} onClick={() => run(() => window.vpn.connectMany(selectedIds))}>
+          <Button variant="primary" disabled={selectedIds.length === 0} onClick={() => connectProfiles(selectedIds)}>
             <Power className="h-4 w-4" /> Connect Selected{selectedIds.length > 0 && ` (${selectedIds.length})`}
           </Button>
           <Button disabled={selectedIds.length === 0} onClick={disconnectSelected}>

@@ -1,9 +1,11 @@
 import { constants } from 'node:fs';
-import { access } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { access, readFile, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { vpnError } from '../../shared/errors';
 import { VpnErrorCode, type LogLevel, type OpenVpnBinaryInfo } from '../../shared/types';
+import { directivesToStrip, resolveCustomRoutes, routingArgs, type RoutingPlan } from '../network/routingPolicy';
 import { classifyLine, levelFromFlags, levelFromText } from './LogClassifier';
+import { analyzeConfig, parseConfig, serializeConfig, type ConfigNode } from './OpenVpnConfigParser';
 import { passwordCommand, usernameCommand, type MgmtMessage } from './managementProtocol';
 import { OpenVpnManagementClient } from './OpenVpnManagementClient';
 import { VpnDriverError, type DriverContext, type VpnDriver } from './VpnDriver';
@@ -22,6 +24,8 @@ export interface ArgsInput {
   cwd: string;
   managementPort: number;
   managementPasswordFile: string;
+  /** Routing/DNS policy arguments, appended last so they win over the config file. */
+  extra?: string[];
 }
 
 /** Command line for one connection. Always an array — never joined into a shell string. */
@@ -36,7 +40,29 @@ export function buildOpenVpnArgs(i: ArgsInput): string[] {
     '--management-query-passwords',
     '--suppress-timestamps',
     '--verb', '3',
+    ...(i.extra ?? []),
   ];
+}
+
+/**
+ * Writes the per-connection runtime copy of the profile config with the given directives
+ * commented out. The stored profile is never modified; relative file references keep
+ * working because openvpn runs with --cd <profile dir>.
+ */
+export async function writeRuntimeConfig(profileConfig: string, workDir: string, strip: string[]): Promise<{ path: string; pulls: boolean }> {
+  const cfg = parseConfig(await readFile(profileConfig, 'utf8'));
+  const disable = (nodes: ConfigNode[]): void => {
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+      if (n.kind === 'directive' && strip.includes(n.name)) nodes[i] = { kind: 'other', line: n.line, raw: `# [routing policy] ${n.raw.trim()}` };
+      if (n.kind === 'inline' && n.children) disable(n.children);
+    }
+  };
+  disable(cfg.nodes);
+  const a = analyzeConfig(cfg);
+  const path = join(workDir, 'runtime.ovpn');
+  await writeFile(path, serializeConfig(cfg), { mode: 0o600 });
+  return { path, pulls: a.has('client') || a.has('pull') };
 }
 
 /**
@@ -75,6 +101,15 @@ export class OpenVpnDriver implements VpnDriver {
     const res = await this.deps.processes.allocate(connectionId);
     this.res = res;
     const cwd = dirname(profile.configPath);
+
+    let configPath: string;
+    let extra: string[];
+    try {
+      ({ configPath, extra } = await this.prepareRouting(res.workDir));
+    } catch (err) {
+      await this.deps.processes.release(connectionId, res);
+      throw new VpnDriverError(vpnError(VpnErrorCode.INVALID_CONFIG, (err as Error).message));
+    }
     const mgmt = new OpenVpnManagementClient({
       port: res.managementPort,
       password: res.managementPassword,
@@ -83,7 +118,7 @@ export class OpenVpnDriver implements VpnDriver {
     this.mgmt = mgmt;
     const proc = new VpnProcess({
       binary: binary.path,
-      args: buildOpenVpnArgs({ configPath: profile.configPath, cwd, ...res }),
+      args: buildOpenVpnArgs({ configPath, cwd, ...res, extra }),
       cwd,
       launcher: this.deps.launcher,
       stopTimeoutMs: this.deps.stopTimeoutMs,
@@ -122,6 +157,26 @@ export class OpenVpnDriver implements VpnDriver {
 
   async stop(): Promise<void> {
     await this.proc?.stop();
+  }
+
+  /** Turns the routing decision and profile settings into a runtime config + arguments. */
+  private async prepareRouting(workDir: string): Promise<{ configPath: string; extra: string[] }> {
+    const { profile, routing, emit } = this.ctx;
+    const plan: RoutingPlan = { defaultRoute: routing.defaultRoute, mode: profile.routingMode, pulls: true };
+    if (plan.mode === 'custom') {
+      plan.routes = await resolveCustomRoutes(profile.customRoutes ?? []);
+      for (const f of plan.routes.failed) emit({ type: 'log', level: 'warn', message: `Custom route ${f.rule} skipped: ${f.reason}` });
+      const bits = (mask: string): number => mask.split('.').reduce((n, o) => n + Number(o).toString(2).replace(/0/g, '').length, 0);
+      const applied = [...plan.routes.v4.map((r) => `${r.network}/${bits(r.netmask)}`), ...plan.routes.v6.map((r) => r.cidr)];
+      emit({ type: 'netinfo', appliedRoutes: applied });
+    }
+    const runtime = await writeRuntimeConfig(profile.configPath, workDir, directivesToStrip(plan));
+    plan.pulls = runtime.pulls;
+    const extra = routingArgs(plan);
+    if (plan.defaultRoute === 'skip' || plan.mode === 'custom') {
+      emit({ type: 'log', level: 'info', message: `Routing policy: ${plan.mode === 'custom' ? 'custom routes only' : 'default route not taken'}` });
+    }
+    return { configPath: runtime.path, extra };
   }
 
   /** Connects to the management interface, subscribes to everything, then lets openvpn go. */
@@ -191,7 +246,9 @@ export class OpenVpnDriver implements VpnDriver {
   private onLogLine(level: LogLevel, line: string): void {
     this.ctx.emit({ type: 'log', level, message: line });
     const info = classifyLine(line);
-    if (info.interfaceName || info.gateway) this.ctx.emit({ type: 'netinfo', interfaceName: info.interfaceName, gateway: info.gateway });
+    if (info.interfaceName || info.gateway || info.pushedDefaultRoute) {
+      this.ctx.emit({ type: 'netinfo', interfaceName: info.interfaceName, gateway: info.gateway, pushedDefaultRoute: info.pushedDefaultRoute });
+    }
     if (info.error) this.reportError(info.error);
   }
 

@@ -5,6 +5,8 @@ export interface LineInfo {
   error?: VpnError;
   interfaceName?: string;
   gateway?: string;
+  /** The server pushed redirect-gateway / redirect-private. */
+  pushedDefaultRoute?: boolean;
 }
 
 interface Rule {
@@ -77,6 +79,7 @@ export function classifyLine(line: string): LineInfo {
     // net30/p2p topology: the second ifconfig argument is the peer, which is the gateway
     if (gw) info.gateway = gw[1];
     else if (ifc && !ifc[2].startsWith('255.')) info.gateway = ifc[2];
+    if (/[,']redirect-(gateway|private)\b/.test(line)) info.pushedDefaultRoute = true;
   }
 
   // "SIGTERM received" etc. are normal shutdown, not errors.

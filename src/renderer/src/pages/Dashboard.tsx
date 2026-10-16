@@ -4,7 +4,7 @@ import { isLive } from '../../../shared/types';
 import { ConnectionCard } from '../components/ConnectionCard';
 import { Button, Card, EmptyState, PageHeader, StatusBadge } from '../components/ui';
 import { formatBytes, formatRate } from '../lib/format';
-import { connectionOf, navigate, run, useStore } from '../store';
+import { connectionOf, navigate, run, useStore, connectProfile } from '../store';
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -89,7 +89,7 @@ export function Dashboard() {
                         </div>
                         <div className="flex items-center gap-4">
                           <StatusBadge status={c?.status ?? 'DISCONNECTED'} />
-                          <Button size="sm" variant="primary" onClick={() => run(() => window.vpn.connect(p.id))}>
+                          <Button size="sm" variant="primary" onClick={() => connectProfile(p.id)}>
                             <Power className="h-3.5 w-3.5" /> Connect
                           </Button>
                         </div>

@@ -9,7 +9,7 @@ export type DriverEvent =
   | { type: 'log'; level: LogLevel; message: string }
   | { type: 'bytes'; bytesIn: number; bytesOut: number }
   /** Tunnel details learned from the log: interface name, pushed gateway. */
-  | { type: 'netinfo'; interfaceName?: string; gateway?: string }
+  | { type: 'netinfo'; interfaceName?: string; gateway?: string; pushedDefaultRoute?: boolean; appliedRoutes?: string[] }
   /** A failure detected while the process is still alive (e.g. AUTH_FAILED in the log). */
   | { type: 'error'; error: VpnError }
   /** The process is gone. Must be emitted exactly once per started driver. */
@@ -35,6 +35,8 @@ export interface DriverContext {
   emit(event: DriverEvent): void;
   /** Asks the user (or, later, secure storage) for a secret. Resolves null when cancelled. */
   requestSecret(req: SecretRequest): Promise<SecretInput | null>;
+  /** Routing decided by VpnManager for this attempt. */
+  routing: { defaultRoute: 'take' | 'skip' };
 }
 
 export type DriverFactory = (ctx: DriverContext) => VpnDriver;

@@ -3,6 +3,8 @@ import { FileUp, X } from 'lucide-react';
 import { AuthDialog } from './components/AuthDialog';
 import { ConfigDialog } from './components/ConfigDialog';
 import { ImportDialog } from './components/ImportDialog';
+import { ProfileSettingsDialog } from './components/ProfileSettingsDialog';
+import { RouteConflictDialog } from './components/RouteConflictDialog';
 import { Sidebar } from './components/Sidebar';
 import { cn } from './lib/format';
 import { Connections } from './pages/Connections';
@@ -94,6 +96,8 @@ export function App() {
       <main className="min-w-0 flex-1 overflow-auto">{ready ? <Current /> : <div className="p-6 text-muted">Loading…</div>}</main>
       <ImportDialog />
       <ConfigDialog />
+      <ProfileSettingsDialog />
+      <RouteConflictDialog />
       <AuthDialog />
       <Toasts />
       {dragging && (

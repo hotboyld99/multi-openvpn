@@ -9,4 +9,5 @@ export function registerNetworkIpc(ctx: AppContext): void {
   handle(IPC.networkGetInterfaces, z.tuple([]), () =>
     describeInterfaces(networkInterfaces(), ctx.manager.list(), { simulateMissing: ctx.mockMode }),
   );
+  handle(IPC.networkGetRoutes, z.tuple([]), () => ctx.routes.list(ctx.manager.list()));
 }

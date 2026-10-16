@@ -3,7 +3,7 @@ import { Cable, Power, RotateCw, ScrollText } from 'lucide-react';
 import { isLive } from '../../../shared/types';
 import { Button, Card, EmptyState, PageHeader, StatusBadge } from '../components/ui';
 import { formatBytes, formatDuration } from '../lib/format';
-import { navigate, run, useNow, useStore } from '../store';
+import { navigate, run, useNow, useStore, connectProfile } from '../store';
 
 /** Debug-oriented table: one row per connection with its process, port and interface. */
 export function Connections() {
@@ -60,7 +60,7 @@ export function Connections() {
                             <Power className="h-3.5 w-3.5 text-red-500" />
                           </Button>
                         ) : (
-                          <Button size="icon" variant="ghost" title="Connect" onClick={() => run(() => window.vpn.connect(c.profileId))}>
+                          <Button size="icon" variant="ghost" title="Connect" onClick={() => connectProfile(c.profileId)}>
                             <Power className="h-3.5 w-3.5 text-emerald-500" />
                           </Button>
                         )}

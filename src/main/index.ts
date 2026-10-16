@@ -10,6 +10,8 @@ import { registerNetworkIpc } from './ipc/network.ipc';
 import { registerProfileIpc } from './ipc/profile.ipc';
 import { registerSettingsIpc } from './ipc/settings.ipc';
 import { registerVpnIpc } from './ipc/vpn.ipc';
+import { RouteManager } from './network/RouteManager';
+import { createPlatformNetworkService } from './platform';
 import { demoProfiles, ProfileStore } from './store/ProfileStore';
 import { SettingsStore } from './store/SettingsStore';
 import { MockVpnDriver } from './vpn/MockVpnDriver';
@@ -85,6 +87,9 @@ async function bootstrap(): Promise<void> {
     Object.entries(networkInterfaces()).find(([, addrs]) => addrs?.some((a) => a.address === ip))?.[0];
   const manager = new VpnManager({ createDriver, getProfile: (id) => profiles.get(id), resolveInterface });
 
+  const platform = createPlatformNetworkService();
+  const routes = new RouteManager(platform, { simulate: mockMode });
+
   const appInfo = (): AppInfo => ({
     version: app.getVersion(),
     platform: process.platform,
@@ -103,7 +108,7 @@ async function bootstrap(): Promise<void> {
   };
   await refreshBinary();
 
-  const ctx: AppContext = { manager, profiles, settings, mockMode, binaries, refreshBinary, appInfo, window: () => mainWindow };
+  const ctx: AppContext = { manager, profiles, settings, mockMode, binaries, routes, refreshBinary, appInfo, window: () => mainWindow };
 
   const devOrigin = rendererUrl ? new URL(rendererUrl).origin : null;
   const fileUrl = pathToFileURL(rendererFile).href;
@@ -116,6 +121,17 @@ async function bootstrap(): Promise<void> {
   manager.on('connection', (c) => send(EVENTS.connection, c));
   manager.on('removed', (id) => send(EVENTS.connectionRemoved, id));
   manager.on('log', (connectionId, entry) => send(EVENTS.log, { connectionId, entry }));
+  manager.on('pushesDefaultRoute', (profileId) => {
+    if (profiles.get(profileId) && !profiles.get(profileId)!.pushesDefaultRoute) void profiles.update(profileId, { pushesDefaultRoute: true });
+  });
+  // openvpn removes its own routes on a graceful stop; after a crash, remove what it left behind.
+  manager.on('ended', (c, graceful) => {
+    if (graceful) return;
+    routes
+      .cleanupAfterCrash(c, manager.list())
+      .then((removed) => removed.length && console.warn(`Removed ${removed.length} stale route(s) of crashed connection ${c.id}`))
+      .catch((err) => console.error('Route cleanup failed (needs the privileged helper):', err.message));
+  });
   manager.on('connected', (c) => {
     if (profiles.get(c.profileId)) void profiles.update(c.profileId, { lastConnectedAt: Date.now() });
   });

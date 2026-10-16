@@ -73,9 +73,9 @@ export function StatusBadge({ status }: { status: VpnStatus }) {
   );
 }
 
-export function Pill({ children, className }: { children: ReactNode; className?: string }) {
+export function Pill({ children, className, title }: { children: ReactNode; className?: string; title?: string }) {
   return (
-    <span className={cn('inline-flex items-center rounded border border-border bg-surface-2 px-1.5 py-px text-[11px] text-muted', className)}>
+    <span title={title} className={cn('inline-flex items-center rounded border border-border bg-surface-2 px-1.5 py-px text-[11px] text-muted', className)}>
       {children}
     </span>
   );

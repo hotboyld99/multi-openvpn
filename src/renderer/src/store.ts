@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import type { AppInfo, AppSettings, ImportPreview, LogEntry, VpnConnection, VpnProfile } from '../../shared/types';
+import type { AppInfo, AppSettings, ConnectOptions, ConnectResult, ImportPreview, LogEntry, RouteConflict, VpnConnection, VpnProfile } from '../../shared/types';
 
 // Central renderer state. Connections are keyed by connectionId — there is no global "connected" flag.
 
@@ -26,6 +26,10 @@ export interface State {
   importPreviews: ImportPreview[] | null;
   /** Profile whose config is open in the viewer/editor. */
   configEditor: { profileId: string; edit: boolean } | null;
+  /** Default-route conflicts waiting for the user's decision (first one is shown). */
+  routeConflicts: RouteConflict[];
+  /** Profile whose routing/DNS settings dialog is open. */
+  profileSettings: string | null;
 }
 
 const MAX_LOGS_PER_CONNECTION = 2_000;
@@ -42,6 +46,8 @@ let state: State = {
   toasts: [],
   importPreviews: null,
   configEditor: null,
+  routeConflicts: [],
+  profileSettings: null,
 };
 const listeners = new Set<() => void>();
 
@@ -63,6 +69,24 @@ export function useStore<T>(selector: (s: State) => T): T {
 export function navigate(page: Page, logsFor?: string): void {
   set((s) => ({ page, logsFor: logsFor ?? s.logsFor }));
 }
+
+const queueConflicts = (results: (ConnectResult | undefined)[]): void => {
+  const conflicts = results.flatMap((r) => (r && 'conflict' in r ? [r.conflict] : []));
+  if (conflicts.length) set((s) => ({ routeConflicts: [...s.routeConflicts, ...conflicts] }));
+};
+
+/** Every UI connect goes through here so a default-route conflict always reaches the user. */
+export async function connectProfile(profileId: string, options?: ConnectOptions): Promise<void> {
+  queueConflicts([await run(() => window.vpn.connect(profileId, options))]);
+}
+
+export async function connectProfiles(profileIds: string[]): Promise<void> {
+  queueConflicts((await run(() => window.vpn.connectMany(profileIds))) ?? []);
+}
+
+export const dismissConflict = (): void => set((s) => ({ routeConflicts: s.routeConflicts.slice(1) }));
+
+export const openProfileSettings = (profileId: string | null): void => set(() => ({ profileSettings: profileId }));
 
 /** Scans the given files and opens the import dialog. */
 export async function startImport(paths: string[]): Promise<void> {

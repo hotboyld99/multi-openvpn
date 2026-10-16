@@ -32,7 +32,8 @@ short report (Completed / Changed files / Decisions / How to test / Limitations 
 | 3 Management interface | done |
 | 4 Profiles | done |
 | 5 Multi VPN | done |
-| 6–9 | pending |
+| 6 Routing | done |
+| 7–9 | pending |
 
 ## Testing real OpenVPN without root
 

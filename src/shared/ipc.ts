@@ -1,11 +1,14 @@
 import type {
   AppInfo,
-  OpenVpnBinaryInfo,
   AppSettings,
+  ConnectOptions,
+  ConnectResult,
   ImportPreview,
   LogEntry,
-  ProfileScan,
   NetworkInterfaceInfo,
+  OpenVpnBinaryInfo,
+  ProfileScan,
+  RouteInfo,
   SecretInput,
   VpnConnection,
   VpnProfile,
@@ -41,6 +44,7 @@ export const IPC = {
   profilesExport: 'profiles:export',
 
   networkGetInterfaces: 'network:getInterfaces',
+  networkGetRoutes: 'network:getRoutes',
 
   settingsGet: 'settings:get',
   settingsUpdate: 'settings:update',
@@ -71,8 +75,9 @@ export interface VpnApi {
   getAppInfo(): Promise<AppInfo>;
   onAppInfo(cb: (info: AppInfo) => void): Unsubscribe;
 
-  connect(profileId: string): Promise<string>;
-  connectMany(profileIds: string[]): Promise<string[]>;
+  /** Resolves with a conflict instead of connecting when the default route is owned by another VPN. */
+  connect(profileId: string, options?: ConnectOptions): Promise<ConnectResult>;
+  connectMany(profileIds: string[]): Promise<ConnectResult[]>;
   disconnect(connectionId: string): Promise<void>;
   reconnect(connectionId: string): Promise<void>;
   disconnectAll(): Promise<void>;
@@ -112,6 +117,7 @@ export interface VpnApi {
 
   network: {
     getInterfaces(): Promise<NetworkInterfaceInfo[]>;
+    getRoutes(): Promise<RouteInfo[]>;
   };
 
   settings: {

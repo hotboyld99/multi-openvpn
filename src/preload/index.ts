@@ -15,7 +15,7 @@ const api: VpnApi = {
   getAppInfo: () => invoke(IPC.appGetInfo),
   onAppInfo: (cb) => subscribe(EVENTS.appInfoChanged, cb),
 
-  connect: (profileId) => invoke(IPC.vpnConnect, profileId),
+  connect: (profileId, options) => invoke(IPC.vpnConnect, profileId, options ?? {}),
   connectMany: (profileIds) => invoke(IPC.vpnConnectMany, profileIds),
   disconnect: (connectionId) => invoke(IPC.vpnDisconnect, connectionId),
   reconnect: (connectionId) => invoke(IPC.vpnReconnect, connectionId),
@@ -48,6 +48,7 @@ const api: VpnApi = {
 
   network: {
     getInterfaces: () => invoke(IPC.networkGetInterfaces),
+    getRoutes: () => invoke(IPC.networkGetRoutes),
   },
 
   settings: {

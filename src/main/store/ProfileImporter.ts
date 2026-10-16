@@ -143,6 +143,7 @@ export async function importProfile(req: ImportRequest, profilesDir: string): Pr
       reconnect: true,
       routingMode: 'config',
       dnsMode: 'vpn',
+      wantsDefaultRoute: !!analyzeConfig(cfg).redirectGateway,
       createdAt: now,
       updatedAt: now,
     };
@@ -157,7 +158,7 @@ export async function importProfile(req: ImportRequest, profilesDir: string): Pr
  * names of files inside the profile directory (openvpn may later run privileged; it must
  * not be pointed at arbitrary files).
  */
-export async function prepareEditedConfig(text: string, profileDir: string): Promise<{ text: string; scan: ProfileScan }> {
+export async function prepareEditedConfig(text: string, profileDir: string): Promise<{ text: string; scan: ProfileScan; wantsDefaultRoute: boolean }> {
   if (Buffer.byteLength(text) > MAX_CONFIG_BYTES) throw new Error('Configuration is larger than 1 MB');
   const cfg = parseConfig(text);
   const problems: string[] = [];
@@ -171,7 +172,7 @@ export async function prepareEditedConfig(text: string, profileDir: string): Pro
     }
   }
   disableUnsupported(cfg.nodes);
-  return { text: serializeConfig(cfg), scan: scanConfig(cfg, problems) };
+  return { text: serializeConfig(cfg), scan: scanConfig(cfg, problems), wantsDefaultRoute: !!analyzeConfig(cfg).redirectGateway };
 }
 
 const INLINE_AS_BASE64 = new Set(['pkcs12']);

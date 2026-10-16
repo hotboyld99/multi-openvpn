@@ -65,7 +65,7 @@ export function registerProfileIpc(ctx: AppContext): void {
     if (prepared.scan.errors.length) throw new Error(prepared.scan.errors.join('\n'));
     if (prepared.scan.dangerous && !acceptDangerous) throw new Error('This configuration can execute local commands; confirmation required');
     await writeFile(p.configPath, prepared.text, { mode: 0o600 });
-    await profiles.update(id, {}); // bump updatedAt, notify UI
+    await profiles.update(id, { wantsDefaultRoute: prepared.wantsDefaultRoute }); // also bumps updatedAt
     return prepared.scan;
   });
 

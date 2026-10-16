@@ -29,6 +29,7 @@ export const ProfilePatchSchema = z
     customRoutes: z.array(RouteRuleSchema).max(500),
     dnsMode: z.enum(['vpn', 'system', 'custom']),
     dnsServers: z.array(z.union([z.ipv4(), z.ipv6()])).max(8),
+    ignoreRedirectGateway: z.boolean(),
   })
   .partial()
   .strict();
@@ -64,3 +65,7 @@ export const ImportRequestSchema = z
 export const ImportRequestListSchema = z.array(ImportRequestSchema).min(1).max(50);
 
 export const ConfigTextSchema = z.string().max(1024 * 1024);
+
+export const ConnectOptionsSchema = z
+  .object({ defaultRoute: z.enum(['take', 'skip']).optional(), replaceDefault: z.boolean().optional() })
+  .strict();

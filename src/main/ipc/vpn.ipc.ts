@@ -2,7 +2,9 @@ import { dialog } from 'electron';
 import { writeFile } from 'node:fs/promises';
 import { z } from 'zod';
 import { IPC } from '../../shared/ipc';
-import { IdListSchema, IdSchema, SecretInputSchema } from '../../shared/schemas';
+import { ConnectOptionsSchema, IdListSchema, IdSchema, SecretInputSchema } from '../../shared/schemas';
+import type { ConnectOptions, ConnectResult } from '../../shared/types';
+import { RouteConflictError } from '../vpn/VpnManager';
 import type { AppContext } from '../context';
 import { handle } from './handle';
 
@@ -11,8 +13,17 @@ export function registerVpnIpc(ctx: AppContext): void {
 
   handle(IPC.appGetInfo, z.tuple([]), () => ctx.appInfo());
 
-  handle(IPC.vpnConnect, z.tuple([IdSchema]), (profileId) => manager.connect(profileId));
-  handle(IPC.vpnConnectMany, z.tuple([IdListSchema]), (ids) => ids.map((id) => manager.connect(id)));
+  const connect = (profileId: string, opts: ConnectOptions = {}): ConnectResult => {
+    try {
+      return { connectionId: manager.connect(profileId, opts) };
+    } catch (err) {
+      if (!(err instanceof RouteConflictError)) throw err;
+      return { conflict: { profileId, holderConnectionId: err.holderConnectionId, holderProfileId: err.holderProfileId } };
+    }
+  };
+  handle(IPC.vpnConnect, z.tuple([IdSchema, ConnectOptionsSchema]), (profileId, opts) => connect(profileId, opts));
+  // Conflicts in a batch are returned per profile; the UI resolves them one by one.
+  handle(IPC.vpnConnectMany, z.tuple([IdListSchema]), (ids) => ids.map((id) => connect(id)));
   handle(IPC.vpnDisconnect, z.tuple([IdSchema]), (id) => manager.disconnect(id));
   handle(IPC.vpnReconnect, z.tuple([IdSchema]), (id) => manager.reconnect(id));
   handle(IPC.vpnDisconnectAll, z.tuple([]), () => manager.disconnectAll());
