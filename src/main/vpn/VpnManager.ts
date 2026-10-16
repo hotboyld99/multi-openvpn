@@ -215,6 +215,18 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
     this.drop(entry);
   }
 
+  /** Adds a line to a connection's log from outside the driver (route/DNS managers). */
+  appendLog(connectionId: string, level: LogLevel, message: string): void {
+    const entry = this.entries.get(connectionId);
+    if (entry) this.log(entry, level, message);
+  }
+
+  /** Records what the DNS manager applied for a connection. */
+  setDnsState(connectionId: string, dns: VpnConnection['dns']): void {
+    const entry = this.entries.get(connectionId);
+    if (entry) this.patch(entry, { dns });
+  }
+
   /** Answers the credential prompt of a connection. */
   submitSecret(connectionId: string, secret: SecretInput): void {
     const entry = this.require(connectionId);
@@ -300,6 +312,8 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
       defaultRoute,
       ownsDefaultRoute: false,
       ignoredDefaultRoute: false,
+      pushedDns: undefined,
+      dns: undefined,
     });
 
     try {
@@ -376,6 +390,15 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
           ...(event.gateway ? { gateway: event.gateway } : {}),
           ...(event.appliedRoutes ? { appliedRoutes: event.appliedRoutes } : {}),
         });
+        if (event.dns) {
+          const prev = entry.conn.pushedDns ?? { servers: [], domains: [] };
+          this.patch(entry, {
+            pushedDns: {
+              servers: [...new Set([...prev.servers, ...event.dns.servers])],
+              domains: [...new Set([...prev.domains, ...event.dns.domains])],
+            },
+          });
+        }
         if (event.pushedDefaultRoute) {
           entry.pushedDefault = true;
           this.emit('pushesDefaultRoute', entry.conn.profileId);
@@ -405,7 +428,7 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
         entry.holdsDefault = false;
         this.settleSecret(entry, null);
         this.emit('ended', { ...entry.conn }, entry.stopping);
-        this.patch(entry, { ownsDefaultRoute: false });
+        this.patch(entry, { ownsDefaultRoute: false, dns: undefined });
         if (entry.stopping) {
           this.finishStopped(entry);
           return;

@@ -9,7 +9,14 @@ export type DriverEvent =
   | { type: 'log'; level: LogLevel; message: string }
   | { type: 'bytes'; bytesIn: number; bytesOut: number }
   /** Tunnel details learned from the log: interface name, pushed gateway. */
-  | { type: 'netinfo'; interfaceName?: string; gateway?: string; pushedDefaultRoute?: boolean; appliedRoutes?: string[] }
+  | {
+      type: 'netinfo';
+      interfaceName?: string;
+      gateway?: string;
+      pushedDefaultRoute?: boolean;
+      appliedRoutes?: string[];
+      dns?: { servers: string[]; domains: string[] };
+    }
   /** A failure detected while the process is still alive (e.g. AUTH_FAILED in the log). */
   | { type: 'error'; error: VpnError }
   /** The process is gone. Must be emitted exactly once per started driver. */

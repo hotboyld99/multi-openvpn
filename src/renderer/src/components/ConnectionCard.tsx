@@ -73,7 +73,18 @@ export function ConnectionCard({ connection, profile }: { connection: VpnConnect
         <Row label="Interface" value={connection.interfaceName} />
         <Row label="Gateway" value={connection.gateway} />
         <Row label="Server" value={connection.remote} />
+        <Row
+          label="DNS"
+          value={
+            connection.dns?.applied
+              ? `${connection.dns.servers.join(', ')} · ${connection.dns.scope === 'split' ? connection.dns.domains.join(', ') : 'global'}`
+              : undefined
+          }
+        />
       </div>
+      {connection.dns?.warning && (
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">{connection.dns.warning}</div>
+      )}
 
       <div className="grid grid-cols-2 gap-2 rounded-md bg-surface-2 px-3 py-2">
         <div>

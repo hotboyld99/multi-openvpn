@@ -140,6 +140,24 @@ export interface VpnConnection {
   ignoredDefaultRoute?: boolean;
   /** Custom routes actually requested from openvpn (hostnames resolved). */
   appliedRoutes?: string[];
+  /** DNS the server pushed (or the config set) for this session. */
+  pushedDns?: { servers: string[]; domains: string[] };
+  /** What the DNS manager did with it. */
+  dns?: DnsState;
+}
+
+/**
+ * global = these servers answer every query (one VPN at a time);
+ * split = only queries for `domains` go to these servers (no conflict between VPNs).
+ */
+export interface DnsState {
+  mode: DnsMode;
+  scope: 'global' | 'split' | 'none';
+  servers: string[];
+  domains: string[];
+  applied: boolean;
+  /** Why it was not (fully) applied, e.g. another VPN controls the system DNS. */
+  warning?: string;
 }
 
 /** Another VPN already owns (or is acquiring) the default route. */

@@ -103,6 +103,11 @@ export class MockVpnDriver implements VpnDriver {
         emit({ type: 'netinfo', pushedDefaultRoute: true });
       }
       const { profile, routing } = this.ctx;
+      // Pushed DNS: full-tunnel servers push a resolver only; the dev VPN pushes a split domain.
+      if (profile.dnsMode === 'vpn' && this.scenario !== 'auth') {
+        const domains = /development/i.test(profile.name) ? ['dev.internal'] : [];
+        emit({ type: 'netinfo', dns: { servers: [`10.${subnet}.0.53`], domains } });
+      }
       if (routing.defaultRoute === 'skip') emit({ type: 'log', level: 'info', message: 'Routing policy: default route not taken' });
       if (profile.routingMode === 'custom') {
         emit({ type: 'netinfo', appliedRoutes: (profile.customRoutes ?? []).filter((r) => r.type !== 'hostname').map((r) => (r.value.includes('/') ? r.value : `${r.value}/32`)) });

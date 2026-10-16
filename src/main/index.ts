@@ -10,6 +10,7 @@ import { registerNetworkIpc } from './ipc/network.ipc';
 import { registerProfileIpc } from './ipc/profile.ipc';
 import { registerSettingsIpc } from './ipc/settings.ipc';
 import { registerVpnIpc } from './ipc/vpn.ipc';
+import { DnsManager } from './network/DnsManager';
 import { RouteManager } from './network/RouteManager';
 import { createPlatformNetworkService } from './platform';
 import { demoProfiles, ProfileStore } from './store/ProfileStore';
@@ -87,8 +88,12 @@ async function bootstrap(): Promise<void> {
     Object.entries(networkInterfaces()).find(([, addrs]) => addrs?.some((a) => a.address === ip))?.[0];
   const manager = new VpnManager({ createDriver, getProfile: (id) => profiles.get(id), resolveInterface });
 
-  const platform = createPlatformNetworkService();
+  const platform = createPlatformNetworkService(join(root, 'state'));
   const routes = new RouteManager(platform, { simulate: mockMode });
+  const dns = new DnsManager(platform, { simulate: mockMode, reassertMs: process.platform === 'darwin' ? 15_000 : undefined });
+  process.on('exit', () => dns.dispose());
+  // A previous run that crashed may have left DNS changed; undo it before anything connects.
+  await dns.recover().catch((err) => console.error('DNS recovery failed:', err.message));
 
   const appInfo = (): AppInfo => ({
     version: app.getVersion(),
@@ -108,7 +113,7 @@ async function bootstrap(): Promise<void> {
   };
   await refreshBinary();
 
-  const ctx: AppContext = { manager, profiles, settings, mockMode, binaries, routes, refreshBinary, appInfo, window: () => mainWindow };
+  const ctx: AppContext = { manager, profiles, settings, mockMode, binaries, routes, dns, refreshBinary, appInfo, window: () => mainWindow };
 
   const devOrigin = rendererUrl ? new URL(rendererUrl).origin : null;
   const fileUrl = pathToFileURL(rendererFile).href;
@@ -124,6 +129,31 @@ async function bootstrap(): Promise<void> {
   manager.on('pushesDefaultRoute', (profileId) => {
     if (profiles.get(profileId) && !profiles.get(profileId)!.pushesDefaultRoute) void profiles.update(profileId, { pushesDefaultRoute: true });
   });
+  // DNS is applied by the app once the tunnel is up, and restored whenever its process ends.
+  manager.on('connected', (c) => {
+    const p = profiles.get(c.profileId);
+    if (!p) return;
+    void dns
+      .setDns({
+        connectionId: c.id,
+        label: p.name,
+        mode: p.dnsMode,
+        customServers: p.dnsServers,
+        pushed: c.pushedDns,
+        ownsDefaultRoute: !!c.ownsDefaultRoute,
+        interfaceName: c.interfaceName,
+      })
+      .then((state) => {
+        if (manager.get(c.id)?.status !== 'CONNECTED') return void dns.restore(c.id); // went down meanwhile
+        manager.setDnsState(c.id, state);
+        if (state.warning) manager.appendLog(c.id, 'warn', state.warning);
+        else if (state.applied) manager.appendLog(c.id, 'info', `DNS ${state.scope}: ${state.servers.join(', ')}${state.domains.length ? ` for ${state.domains.join(', ')}` : ''}`);
+      });
+  });
+  manager.on('ended', (c) => {
+    void dns.restore(c.id).catch((err) => manager.appendLog(c.id, 'error', `DNS restore failed: ${err.message}`));
+  });
+
   // openvpn removes its own routes on a graceful stop; after a crash, remove what it left behind.
   manager.on('ended', (c, graceful) => {
     if (graceful) return;

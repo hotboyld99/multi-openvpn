@@ -7,6 +7,23 @@ export interface LineInfo {
   gateway?: string;
   /** The server pushed redirect-gateway / redirect-private. */
   pushedDefaultRoute?: boolean;
+  /** DNS settings pushed by the server (dhcp-option DNS/DOMAIN or OpenVPN 2.6 `dns`). */
+  dns?: { servers: string[]; domains: string[] };
+}
+
+/** DNS servers and domains in a list of pushed/config options ("dhcp-option DNS 10.8.0.1", "dns server 0 address ..."). */
+export function dnsFromOptions(options: string[]): { servers: string[]; domains: string[] } {
+  const servers: string[] = [];
+  const domains: string[] = [];
+  for (const opt of options) {
+    const [kw, a, b, ...rest] = opt.trim().split(/\s+/);
+    if (kw === 'dhcp-option' && (a === 'DNS' || a === 'DNS6') && b) servers.push(b);
+    else if (kw === 'dhcp-option' && (a === 'DOMAIN' || a === 'DOMAIN-SEARCH' || a === 'ADAPTER_DOMAIN_SUFFIX') && b) domains.push(b);
+    else if (kw === 'dns' && a === 'server' && rest[0] && b !== undefined && rest[0] === 'address') servers.push(...rest.slice(1));
+    else if (kw === 'dns' && a === 'search-domains') domains.push(...[b, ...rest].filter(Boolean));
+  }
+  const uniq = (xs: string[]): string[] => [...new Set(xs)];
+  return { servers: uniq(servers), domains: uniq(domains.map((d) => d.toLowerCase().replace(/\.$/, ''))) };
 }
 
 interface Rule {
@@ -80,6 +97,9 @@ export function classifyLine(line: string): LineInfo {
     if (gw) info.gateway = gw[1];
     else if (ifc && !ifc[2].startsWith('255.')) info.gateway = ifc[2];
     if (/[,']redirect-(gateway|private)\b/.test(line)) info.pushedDefaultRoute = true;
+    const body = /PUSH_REPLY,(.*?)'?$/.exec(line)?.[1] ?? '';
+    const dns = dnsFromOptions(body.split(','));
+    if (dns.servers.length || dns.domains.length) info.dns = dns;
   }
 
   // "SIGTERM received" etc. are normal shutdown, not errors.

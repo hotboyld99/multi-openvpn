@@ -17,11 +17,13 @@ export function Interfaces() {
   const profiles = useStore((s) => s.profiles);
   const connections = useStore((s) => s.connections);
   const [items, setItems] = useState<NetworkInterfaceInfo[]>([]);
+  const [dns, setDns] = useState<{ servers: string[]; ownerConnectionId?: string } | null>(null);
   const [showAll, setShowAll] = useState(false);
 
   const refresh = useCallback(async () => {
-    const list = await run(() => window.vpn.network.getInterfaces());
+    const [list, d] = await Promise.all([run(() => window.vpn.network.getInterfaces()), run(() => window.vpn.network.getDns())]);
     if (list) setItems(list);
+    if (d) setDns(d);
   }, []);
 
   // Refresh whenever any connection changes (interfaces appear/disappear with tunnels) and every 5s.
@@ -43,7 +45,17 @@ export function Interfaces() {
     <div>
       <PageHeader
         title="Network Interfaces"
-        subtitle="Each VPN is mapped to its own virtual interface"
+        subtitle={
+          <>
+            Each VPN is mapped to its own virtual interface
+            {dns && (
+              <span className="selectable block">
+                System DNS: <span className="font-mono">{dns.servers.join(', ') || '—'}</span>
+                {dns.ownerConnectionId && ` (set by ${profileName(connections[dns.ownerConnectionId]?.profileId) ?? 'a VPN'})`}
+              </span>
+            )}
+          </>
+        }
         actions={
           <>
             <label className="flex items-center gap-2 text-xs text-muted">

@@ -4,8 +4,8 @@ import { dirname, join } from 'node:path';
 import { vpnError } from '../../shared/errors';
 import { VpnErrorCode, type LogLevel, type OpenVpnBinaryInfo } from '../../shared/types';
 import { directivesToStrip, resolveCustomRoutes, routingArgs, type RoutingPlan } from '../network/routingPolicy';
-import { classifyLine, levelFromFlags, levelFromText } from './LogClassifier';
-import { analyzeConfig, parseConfig, serializeConfig, type ConfigNode } from './OpenVpnConfigParser';
+import { classifyLine, dnsFromOptions, levelFromFlags, levelFromText } from './LogClassifier';
+import { allDirectives, analyzeConfig, parseConfig, serializeConfig, type ConfigNode } from './OpenVpnConfigParser';
 import { passwordCommand, usernameCommand, type MgmtMessage } from './managementProtocol';
 import { OpenVpnManagementClient } from './OpenVpnManagementClient';
 import { VpnDriverError, type DriverContext, type VpnDriver } from './VpnDriver';
@@ -49,7 +49,11 @@ export function buildOpenVpnArgs(i: ArgsInput): string[] {
  * commented out. The stored profile is never modified; relative file references keep
  * working because openvpn runs with --cd <profile dir>.
  */
-export async function writeRuntimeConfig(profileConfig: string, workDir: string, strip: string[]): Promise<{ path: string; pulls: boolean }> {
+export async function writeRuntimeConfig(
+  profileConfig: string,
+  workDir: string,
+  strip: string[],
+): Promise<{ path: string; pulls: boolean; dns: { servers: string[]; domains: string[] } }> {
   const cfg = parseConfig(await readFile(profileConfig, 'utf8'));
   const disable = (nodes: ConfigNode[]): void => {
     for (let i = 0; i < nodes.length; i++) {
@@ -58,11 +62,13 @@ export async function writeRuntimeConfig(profileConfig: string, workDir: string,
       if (n.kind === 'inline' && n.children) disable(n.children);
     }
   };
+  // DNS set in the config itself is applied by the app (DnsManager), like pushed DNS.
+  const configDns = dnsFromOptions(allDirectives(cfg.nodes).filter((d) => d.name === 'dhcp-option' || d.name === 'dns').map((d) => d.raw));
   disable(cfg.nodes);
   const a = analyzeConfig(cfg);
   const path = join(workDir, 'runtime.ovpn');
   await writeFile(path, serializeConfig(cfg), { mode: 0o600 });
-  return { path, pulls: a.has('client') || a.has('pull') };
+  return { path, pulls: a.has('client') || a.has('pull'), dns: configDns };
 }
 
 /**
@@ -170,9 +176,11 @@ export class OpenVpnDriver implements VpnDriver {
       const applied = [...plan.routes.v4.map((r) => `${r.network}/${bits(r.netmask)}`), ...plan.routes.v6.map((r) => r.cidr)];
       emit({ type: 'netinfo', appliedRoutes: applied });
     }
-    const runtime = await writeRuntimeConfig(profile.configPath, workDir, directivesToStrip(plan));
+    // The app applies DNS itself on every OS (DnsManager), so openvpn must not.
+    const runtime = await writeRuntimeConfig(profile.configPath, workDir, [...directivesToStrip(plan), 'dhcp-option', 'dns']);
     plan.pulls = runtime.pulls;
-    const extra = routingArgs(plan);
+    if (profile.dnsMode === 'vpn' && (runtime.dns.servers.length || runtime.dns.domains.length)) emit({ type: 'netinfo', dns: runtime.dns });
+    const extra = [...routingArgs(plan), ...(plan.pulls ? ['--pull-filter', 'ignore', 'dhcp-option', '--pull-filter', 'ignore', 'dns '] : [])];
     if (plan.defaultRoute === 'skip' || plan.mode === 'custom') {
       emit({ type: 'log', level: 'info', message: `Routing policy: ${plan.mode === 'custom' ? 'custom routes only' : 'default route not taken'}` });
     }
@@ -246,8 +254,9 @@ export class OpenVpnDriver implements VpnDriver {
   private onLogLine(level: LogLevel, line: string): void {
     this.ctx.emit({ type: 'log', level, message: line });
     const info = classifyLine(line);
-    if (info.interfaceName || info.gateway || info.pushedDefaultRoute) {
-      this.ctx.emit({ type: 'netinfo', interfaceName: info.interfaceName, gateway: info.gateway, pushedDefaultRoute: info.pushedDefaultRoute });
+    const dns = this.ctx.profile.dnsMode === 'vpn' ? info.dns : undefined; // 'system'/'custom' ignore pushed DNS
+    if (info.interfaceName || info.gateway || info.pushedDefaultRoute || dns) {
+      this.ctx.emit({ type: 'netinfo', interfaceName: info.interfaceName, gateway: info.gateway, pushedDefaultRoute: info.pushedDefaultRoute, dns });
     }
     if (info.error) this.reportError(info.error);
   }

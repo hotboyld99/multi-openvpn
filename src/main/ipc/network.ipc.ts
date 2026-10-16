@@ -10,4 +10,9 @@ export function registerNetworkIpc(ctx: AppContext): void {
     describeInterfaces(networkInterfaces(), ctx.manager.list(), { simulateMissing: ctx.mockMode }),
   );
   handle(IPC.networkGetRoutes, z.tuple([]), () => ctx.routes.list(ctx.manager.list()));
+  handle(IPC.networkGetDns, z.tuple([]), async () => {
+    const owner = ctx.dns.globalOwner();
+    const servers = ctx.mockMode && owner ? owner.servers : await ctx.dns.getCurrentDns().catch(() => []);
+    return { servers, ownerConnectionId: owner?.connectionId };
+  });
 }

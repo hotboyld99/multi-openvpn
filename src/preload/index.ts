@@ -49,6 +49,7 @@ const api: VpnApi = {
   network: {
     getInterfaces: () => invoke(IPC.networkGetInterfaces),
     getRoutes: () => invoke(IPC.networkGetRoutes),
+    getDns: () => invoke(IPC.networkGetDns),
   },
 
   settings: {

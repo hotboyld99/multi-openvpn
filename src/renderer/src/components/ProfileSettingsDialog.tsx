@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Plus, Settings2, X } from 'lucide-react';
-import { isLive, type RouteRule, type RoutingMode, type VpnProfile } from '../../../shared/types';
+import { isLive, type DnsMode, type RouteRule, type RoutingMode, type VpnProfile } from '../../../shared/types';
 import { Button, Input, Pill } from './ui';
 import { cn } from '../lib/format';
 import { connectionOf, openProfileSettings, run, toast, useStore } from '../store';
@@ -37,6 +37,9 @@ function Editor({ profile, liveConnectionId }: { profile: VpnProfile; liveConnec
   const [rules, setRules] = useState<RouteRule[]>(profile.customRoutes ?? []);
   const [draft, setDraft] = useState('');
   useEffect(() => setDraft(''), [mode]);
+  const [dnsMode, setDnsMode] = useState<DnsMode>(profile.dnsMode);
+  const [dnsText, setDnsText] = useState((profile.dnsServers ?? []).join(', '));
+  const dnsServers = dnsText.split(/[\s,]+/).filter(Boolean);
 
   const add = (): void => {
     const value = draft.trim();
@@ -47,7 +50,13 @@ function Editor({ profile, liveConnectionId }: { profile: VpnProfile; liveConnec
 
   const save = async (reconnect: boolean): Promise<void> => {
     const saved = await run(() =>
-      window.vpn.profiles.update(profile.id, { routingMode: mode, customRoutes: rules, ignoreRedirectGateway: ignoreDefault }),
+      window.vpn.profiles.update(profile.id, {
+        routingMode: mode,
+        customRoutes: rules,
+        ignoreRedirectGateway: ignoreDefault,
+        dnsMode,
+        ...(dnsMode === 'custom' ? { dnsServers } : {}),
+      }),
     );
     if (!saved) return;
     openProfileSettings(null);
@@ -59,9 +68,10 @@ function Editor({ profile, liveConnectionId }: { profile: VpnProfile; liveConnec
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
       <div className="flex max-h-full w-[520px] flex-col rounded-lg border border-border bg-surface shadow-xl">
         <div className="flex items-center gap-2 border-b border-border px-5 py-3 font-semibold">
-          <Settings2 className="h-4 w-4 text-accent" /> {profile.name} — Routing
+          <Settings2 className="h-4 w-4 text-accent" /> {profile.name} — Routing & DNS
         </div>
         <div className="flex flex-col gap-2 overflow-auto p-5">
+          <h3 className="text-xs font-medium tracking-wide text-muted uppercase">Routing</h3>
           <Radio checked={mode === 'config'} onChange={() => setMode('config')} label="Use routes from OpenVPN configuration" />
           {mode === 'config' && (
             <label className="ml-6 flex items-start gap-2 text-xs">
@@ -114,6 +124,20 @@ function Editor({ profile, liveConnectionId }: { profile: VpnProfile; liveConnec
               )}
             </div>
           )}
+
+          <h3 className="mt-4 text-xs font-medium tracking-wide text-muted uppercase">DNS</h3>
+          <Radio
+            checked={dnsMode === 'vpn'}
+            onChange={() => setDnsMode('vpn')}
+            label="Use VPN DNS"
+            hint="Servers pushed by the VPN. With domains, only those domains use them (split DNS), so several VPNs never conflict."
+          />
+          <Radio checked={dnsMode === 'system'} onChange={() => setDnsMode('system')} label="Keep system DNS" hint="Ignore DNS pushed by the VPN." />
+          <Radio checked={dnsMode === 'custom'} onChange={() => setDnsMode('custom')} label="Custom DNS" hint="Use these servers for all queries while connected." />
+          {dnsMode === 'custom' && (
+            <Input className="ml-6 font-mono" placeholder="1.1.1.1, 8.8.8.8" value={dnsText} onChange={(e) => setDnsText(e.target.value)} />
+          )}
+          <p className="text-xs text-muted">Only one VPN at a time can control the system-wide DNS; others get a DNS conflict warning.</p>
         </div>
         <div className="flex justify-end gap-2 border-t border-border px-5 py-3">
           <Button onClick={() => openProfileSettings(null)}>Cancel</Button>

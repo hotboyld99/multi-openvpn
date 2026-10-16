@@ -45,6 +45,7 @@ export const IPC = {
 
   networkGetInterfaces: 'network:getInterfaces',
   networkGetRoutes: 'network:getRoutes',
+  networkGetDns: 'network:getDns',
 
   settingsGet: 'settings:get',
   settingsUpdate: 'settings:update',
@@ -118,6 +119,8 @@ export interface VpnApi {
   network: {
     getInterfaces(): Promise<NetworkInterfaceInfo[]>;
     getRoutes(): Promise<RouteInfo[]>;
+    /** Current default DNS servers and which VPN (if any) controls them. */
+    getDns(): Promise<{ servers: string[]; ownerConnectionId?: string }>;
   };
 
   settings: {
