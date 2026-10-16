@@ -2,6 +2,7 @@ import type { BrowserWindow } from 'electron';
 import type { AppInfo } from '../shared/types';
 import type { ProfileStore } from './store/ProfileStore';
 import type { SettingsStore } from './store/SettingsStore';
+import type { OpenVpnBinaryManager } from './vpn/OpenVpnBinaryManager';
 import type { VpnManager } from './vpn/VpnManager';
 
 /** Long-lived services shared by IPC handlers. Created once in index.ts. */
@@ -10,6 +11,9 @@ export interface AppContext {
   profiles: ProfileStore;
   settings: SettingsStore;
   mockMode: boolean;
+  binaries: OpenVpnBinaryManager;
+  /** Re-resolves the OpenVPN binary from settings and notifies the renderer. */
+  refreshBinary(): Promise<void>;
   appInfo(): AppInfo;
   window(): BrowserWindow | null;
 }

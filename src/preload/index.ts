@@ -13,6 +13,7 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
 
 const api: VpnApi = {
   getAppInfo: () => invoke(IPC.appGetInfo),
+  onAppInfo: (cb) => subscribe(EVENTS.appInfoChanged, cb),
 
   connect: (profileId) => invoke(IPC.vpnConnect, profileId),
   connectMany: (profileIds) => invoke(IPC.vpnConnectMany, profileIds),
@@ -43,6 +44,11 @@ const api: VpnApi = {
     get: () => invoke(IPC.settingsGet),
     update: (patch) => invoke(IPC.settingsUpdate, patch),
     onChanged: (cb) => subscribe(EVENTS.settingsChanged, cb),
+  },
+
+  openvpn: {
+    detect: () => invoke(IPC.openvpnDetect),
+    browse: () => invoke(IPC.openvpnBrowse),
   },
 };
 

@@ -1,19 +1,22 @@
 import { app, BrowserWindow, shell } from 'electron';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { vpnError } from '../shared/errors';
 import { EVENTS } from '../shared/ipc';
-import { VpnErrorCode, type AppInfo } from '../shared/types';
+import type { AppInfo, OpenVpnBinaryInfo } from '../shared/types';
 import type { AppContext } from './context';
 import { setTrustedOrigin } from './ipc/handle';
 import { registerNetworkIpc } from './ipc/network.ipc';
 import { registerProfileIpc } from './ipc/profile.ipc';
+import { registerSettingsIpc } from './ipc/settings.ipc';
 import { registerVpnIpc } from './ipc/vpn.ipc';
 import { demoProfiles, ProfileStore } from './store/ProfileStore';
 import { SettingsStore } from './store/SettingsStore';
 import { MockVpnDriver } from './vpn/MockVpnDriver';
-import { VpnDriverError, type DriverFactory } from './vpn/VpnDriver';
+import { OpenVpnBinaryManager } from './vpn/OpenVpnBinaryManager';
+import { OpenVpnDriver } from './vpn/OpenVpnDriver';
+import type { DriverFactory } from './vpn/VpnDriver';
 import { VpnManager } from './vpn/VpnManager';
+import { VpnProcessManager } from './vpn/VpnProcessManager';
 
 const mockMode = process.env.VPN_MOCK_MODE === 'true';
 const rendererUrl = process.env.ELECTRON_RENDERER_URL;
@@ -21,16 +24,6 @@ const rendererFile = join(__dirname, '../renderer/index.html');
 
 let mainWindow: BrowserWindow | null = null;
 let quitting = false;
-
-const createDriver: DriverFactory = (ctx) => {
-  if (mockMode) return new MockVpnDriver(ctx);
-  // Real OpenVpnDriver is implemented in Phase 2.
-  return {
-    start: () =>
-      Promise.reject(new VpnDriverError(vpnError(VpnErrorCode.OPENVPN_NOT_FOUND, 'Real OpenVPN driver not available yet; run with VPN_MOCK_MODE=true'))),
-    stop: () => Promise.resolve(),
-  };
-};
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -72,6 +65,17 @@ async function bootstrap(): Promise<void> {
   await Promise.all([profiles.load(), settings.load()]);
   if (mockMode && profiles.list().length === 0) for (const p of demoProfiles()) await profiles.add(p);
 
+  const binaries = new OpenVpnBinaryManager({
+    bundledRoot: app.isPackaged ? join(process.resourcesPath, 'openvpn') : join(app.getAppPath(), 'resources', 'openvpn'),
+  });
+  let openvpn: OpenVpnBinaryInfo | null = null;
+
+  const processes = new VpnProcessManager(join(app.getPath('temp'), 'multi-openvpn'));
+  // If main dies without a graceful disconnect, do not leave orphaned openvpn processes behind.
+  process.on('exit', () => processes.killAll());
+
+  const createDriver: DriverFactory = (dctx) =>
+    mockMode ? new MockVpnDriver(dctx) : new OpenVpnDriver(dctx, { processes, binary: () => openvpn });
   const manager = new VpnManager({ createDriver, getProfile: (id) => profiles.get(id) });
 
   const appInfo = (): AppInfo => ({
@@ -79,10 +83,20 @@ async function bootstrap(): Promise<void> {
     platform: process.platform,
     arch: process.arch,
     mockMode,
-    openvpn: mockMode ? { path: 'mock', version: '2.6.x (mock)', source: 'bundled' } : null,
+    openvpn: mockMode ? { path: 'mock', version: '2.6.x (mock)', source: 'bundled' } : openvpn,
   });
 
-  const ctx: AppContext = { manager, profiles, settings, mockMode, appInfo, window: () => mainWindow };
+  const send = (channel: string, ...args: unknown[]): void => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, ...args);
+  };
+
+  const refreshBinary = async (): Promise<void> => {
+    openvpn = await binaries.resolve(settings.get().openvpnPath);
+    send(EVENTS.appInfoChanged, appInfo());
+  };
+  await refreshBinary();
+
+  const ctx: AppContext = { manager, profiles, settings, mockMode, binaries, refreshBinary, appInfo, window: () => mainWindow };
 
   const devOrigin = rendererUrl ? new URL(rendererUrl).origin : null;
   const fileUrl = pathToFileURL(rendererFile).href;
@@ -91,10 +105,7 @@ async function bootstrap(): Promise<void> {
   registerVpnIpc(ctx);
   registerProfileIpc(ctx);
   registerNetworkIpc(ctx);
-
-  const send = (channel: string, ...args: unknown[]): void => {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, ...args);
-  };
+  registerSettingsIpc(ctx);
   manager.on('connection', (c) => send(EVENTS.connection, c));
   manager.on('removed', (id) => send(EVENTS.connectionRemoved, id));
   manager.on('log', (connectionId, entry) => send(EVENTS.log, { connectionId, entry }));

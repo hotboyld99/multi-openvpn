@@ -1,5 +1,6 @@
 import type {
   AppInfo,
+  OpenVpnBinaryInfo,
   AppSettings,
   LogEntry,
   NetworkInterfaceInfo,
@@ -31,6 +32,9 @@ export const IPC = {
 
   settingsGet: 'settings:get',
   settingsUpdate: 'settings:update',
+
+  openvpnDetect: 'openvpn:detect',
+  openvpnBrowse: 'openvpn:browse',
 } as const;
 
 /** Push channels (main → renderer, webContents.send). */
@@ -40,6 +44,7 @@ export const EVENTS = {
   log: 'vpn:log',
   profilesChanged: 'profiles:changed',
   settingsChanged: 'settings:changed',
+  appInfoChanged: 'app:infoChanged',
 } as const;
 
 export interface LogEvent {
@@ -52,6 +57,7 @@ type Unsubscribe = () => void;
 /** The complete surface exposed to the renderer as `window.vpn`. Nothing else crosses the bridge. */
 export interface VpnApi {
   getAppInfo(): Promise<AppInfo>;
+  onAppInfo(cb: (info: AppInfo) => void): Unsubscribe;
 
   connect(profileId: string): Promise<string>;
   connectMany(profileIds: string[]): Promise<string[]>;
@@ -83,5 +89,12 @@ export interface VpnApi {
     get(): Promise<AppSettings>;
     update(patch: SettingsPatch): Promise<AppSettings>;
     onChanged(cb: (settings: AppSettings) => void): Unsubscribe;
+  };
+
+  openvpn: {
+    /** The binary in use plus every valid binary found on this machine. */
+    detect(): Promise<{ current: OpenVpnBinaryInfo | null; candidates: OpenVpnBinaryInfo[] }>;
+    /** File dialog → validate → save as custom path. Resolves null when cancelled. */
+    browse(): Promise<OpenVpnBinaryInfo | null>;
   };
 }

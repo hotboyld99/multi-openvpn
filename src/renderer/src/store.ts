@@ -99,6 +99,7 @@ export async function initStore(): Promise<void> {
   );
   api.profiles.onChanged((profiles) => set(() => ({ profiles })));
   api.settings.onChanged((settings) => set(() => ({ settings })));
+  api.onAppInfo((appInfo) => set(() => ({ appInfo })));
 
   const [appInfo, settings, profiles, connections] = await Promise.all([
     api.getAppInfo(),
