@@ -1,0 +1,124 @@
+import { vpnError } from '../../shared/errors';
+import { VpnErrorCode } from '../../shared/types';
+import type { DriverContext, VpnDriver } from './VpnDriver';
+
+/**
+ * VPN_MOCK_MODE driver: walks the same state sequence a real openvpn reports and
+ * generates traffic, so the whole app (VpnManager, IPC, UI) runs without a server.
+ *
+ * Demo profiles pick a scenario through their config path: mock://ok, mock://auth-fail, mock://flaky.
+ */
+export type MockScenario = 'ok' | 'auth-fail' | 'flaky';
+
+let nextPid = 41_000;
+// Prefixed so a mock tunnel can never be mistaken for a real utunN of the OS.
+let nextUtun = 0;
+let nextPort = 25_100;
+
+export const scenarioOf = (configPath: string): MockScenario => {
+  const m = /^mock:\/\/(ok|auth-fail|flaky)$/.exec(configPath);
+  return (m?.[1] as MockScenario | undefined) ?? 'ok';
+};
+
+const hash = (s: string): number => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+
+export class MockVpnDriver implements VpnDriver {
+  pid?: number;
+  managementPort?: number;
+  private timers: ReturnType<typeof setTimeout>[] = [];
+  private traffic?: ReturnType<typeof setInterval>;
+  private exited = false;
+  private bytesIn = 0;
+  private bytesOut = 0;
+
+  constructor(
+    private readonly ctx: DriverContext,
+    private readonly scenario: MockScenario = scenarioOf(ctx.profile.configPath),
+  ) {}
+
+  async start(): Promise<void> {
+    this.pid = nextPid++;
+    this.managementPort = nextPort++;
+    const h = hash(this.ctx.profile.id);
+    const subnet = 8 + (h % 40);
+    const ip = `10.${subnet}.0.${2 + (h % 200)}`;
+    const gateway = `10.${subnet}.0.1`;
+    const remote = `203.0.113.${1 + (h % 250)}`;
+    const utun = `mock-utun${nextUtun++}`;
+    const { emit } = this.ctx;
+
+    emit({ type: 'log', level: 'info', message: `OpenVPN 2.6.x (mock) pid ${this.pid}, management 127.0.0.1:${this.managementPort}` });
+    this.at(150, () => emit({ type: 'state', state: 'RESOLVE' }));
+    this.at(300, () => {
+      emit({ type: 'log', level: 'info', message: `TCP/UDP: Preserving recently used remote address: [AF_INET]${remote}:1194` });
+      emit({ type: 'state', state: 'WAIT' });
+    });
+    this.at(700, () => {
+      emit({ type: 'log', level: 'info', message: 'TLS: Initial packet from server, sid=mock' });
+      emit({ type: 'state', state: 'AUTH' });
+    });
+
+    if (this.scenario === 'auth-fail') {
+      this.at(1200, () => {
+        emit({ type: 'log', level: 'error', message: 'AUTH: Received control message: AUTH_FAILED' });
+        emit({ type: 'error', error: vpnError(VpnErrorCode.AUTH_FAILED, 'AUTH: Received control message: AUTH_FAILED') });
+      });
+      return;
+    }
+
+    this.at(1100, () => emit({ type: 'state', state: 'GET_CONFIG' }));
+    this.at(1400, () => {
+      emit({ type: 'log', level: 'info', message: `Opened utun device ${utun}` });
+      emit({ type: 'interface', name: utun });
+      emit({ type: 'state', state: 'ASSIGN_IP', localIp: ip });
+    });
+    this.at(1700, () => {
+      emit({ type: 'log', level: 'info', message: `/sbin/route add -net 10.${subnet}.0.0 ${gateway} 255.255.0.0` });
+      emit({ type: 'state', state: 'ADD_ROUTES' });
+    });
+    this.at(2000, () => {
+      emit({ type: 'log', level: 'info', message: 'Initialization Sequence Completed' });
+      emit({ type: 'state', state: 'CONNECTED', localIp: ip, remote, gateway });
+      this.traffic = setInterval(() => {
+        // ~1.4 MB/s down, ~320 KB/s up with jitter
+        this.bytesIn += Math.round(1_400_000 * (0.5 + Math.random()));
+        this.bytesOut += Math.round(320_000 * (0.5 + Math.random()));
+        emit({ type: 'bytes', bytesIn: this.bytesIn, bytesOut: this.bytesOut });
+      }, 1_000);
+    });
+
+    if (this.scenario === 'flaky') {
+      this.at(20_000, () => {
+        emit({ type: 'log', level: 'error', message: 'Inactivity timeout (--ping-restart), restarting' });
+        this.exit(1, null);
+      });
+    }
+  }
+
+  async stop(): Promise<void> {
+    if (this.exited) return;
+    this.clear();
+    this.ctx.emit({ type: 'log', level: 'info', message: 'SIGTERM[hard,] received, process exiting' });
+    this.ctx.emit({ type: 'state', state: 'EXITING' });
+    await new Promise((r) => setTimeout(r, 200));
+    this.exit(0, null);
+  }
+
+  private exit(code: number | null, signal: string | null): void {
+    if (this.exited) return;
+    this.exited = true;
+    this.clear();
+    this.ctx.emit({ type: 'exit', code, signal });
+  }
+
+  private at(ms: number, fn: () => void): void {
+    this.timers.push(setTimeout(fn, ms));
+  }
+
+  private clear(): void {
+    this.timers.forEach(clearTimeout);
+    this.timers = [];
+    if (this.traffic) clearInterval(this.traffic);
+    this.traffic = undefined;
+  }
+}

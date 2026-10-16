@@ -1,0 +1,167 @@
+// Domain types shared by main, preload and renderer.
+// Timestamps are epoch milliseconds: they survive JSON persistence and IPC unchanged.
+
+export type VpnStatus =
+  | 'DISCONNECTED'
+  | 'CONNECTING'
+  | 'WAIT'
+  | 'AUTH'
+  | 'GET_CONFIG'
+  | 'ASSIGN_IP'
+  | 'ADD_ROUTES'
+  | 'CONNECTED'
+  | 'RECONNECTING'
+  | 'DISCONNECTING'
+  | 'ERROR';
+
+/** Statuses in which a connection owns (or is acquiring) a live openvpn process. */
+export const LIVE_STATUSES: readonly VpnStatus[] = [
+  'CONNECTING',
+  'WAIT',
+  'AUTH',
+  'GET_CONFIG',
+  'ASSIGN_IP',
+  'ADD_ROUTES',
+  'CONNECTED',
+  'RECONNECTING',
+  'DISCONNECTING',
+];
+
+export const isLive = (s: VpnStatus): boolean => LIVE_STATUSES.includes(s);
+
+export enum VpnErrorCode {
+  AUTH_FAILED = 'AUTH_FAILED',
+  TLS_ERROR = 'TLS_ERROR',
+  CERT_EXPIRED = 'CERT_EXPIRED',
+  NETWORK_UNREACHABLE = 'NETWORK_UNREACHABLE',
+  CONNECTION_TIMEOUT = 'CONNECTION_TIMEOUT',
+  ROUTE_CONFLICT = 'ROUTE_CONFLICT',
+  DNS_CONFLICT = 'DNS_CONFLICT',
+  OPENVPN_NOT_FOUND = 'OPENVPN_NOT_FOUND',
+  INVALID_CONFIG = 'INVALID_CONFIG',
+  PERMISSION_DENIED = 'PERMISSION_DENIED',
+  PROCESS_CRASHED = 'PROCESS_CRASHED',
+  UNKNOWN = 'UNKNOWN',
+}
+
+export interface VpnError {
+  code: VpnErrorCode;
+  /** Short title, e.g. "Authentication Failed". */
+  title: string;
+  /** Human explanation shown in the UI. */
+  message: string;
+  /** Raw log line or exception text that triggered it, for debugging. */
+  detail?: string;
+}
+
+export type RouteRuleType = 'cidr' | 'ip' | 'hostname';
+
+export interface RouteRule {
+  id: string;
+  type: RouteRuleType;
+  value: string;
+}
+
+export type RoutingMode = 'config' | 'custom';
+export type DnsMode = 'vpn' | 'system' | 'custom';
+
+export interface VpnProfile {
+  id: string;
+  name: string;
+  /** Absolute path of the stored config inside the profile directory. */
+  configPath: string;
+  /** Original file name, shown in lists. */
+  configFileName: string;
+  username?: string;
+  /** True when a password is stored in secure storage. The password itself never leaves main. */
+  hasSavedPassword: boolean;
+  autoConnect: boolean;
+  reconnect: boolean;
+  routingMode: RoutingMode;
+  customRoutes?: RouteRule[];
+  dnsMode: DnsMode;
+  dnsServers?: string[];
+  lastConnectedAt?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface VpnConnection {
+  id: string;
+  profileId: string;
+  pid?: number;
+  managementPort?: number;
+  status: VpnStatus;
+  /** When the user asked to connect. */
+  startedAt: number;
+  /** When the tunnel last reached CONNECTED; drives the duration timer. */
+  connectedAt?: number;
+  assignedIp?: string;
+  publicIp?: string;
+  interfaceName?: string;
+  gateway?: string;
+  remote?: string;
+  bytesIn: number;
+  bytesOut: number;
+  /** Bytes per second, computed from the last two counter samples. */
+  rateIn: number;
+  rateOut: number;
+  reconnectCount: number;
+  /** Epoch ms of the next automatic retry while RECONNECTING. */
+  nextRetryAt?: number;
+  error?: VpnError;
+}
+
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+export interface LogEntry {
+  seq: number;
+  ts: number;
+  level: LogLevel;
+  message: string;
+}
+
+export interface InterfaceAddress {
+  address: string;
+  family: 'IPv4' | 'IPv6';
+  cidr: string | null;
+}
+
+/** vpn = a tunnel owned by one of our connections; tunnel = a tunnel-like interface we do not own. */
+export type InterfaceKind = 'physical' | 'vpn' | 'tunnel' | 'loopback' | 'other';
+
+export interface NetworkInterfaceInfo {
+  name: string;
+  kind: InterfaceKind;
+  mac?: string;
+  addresses: InterfaceAddress[];
+  /** Connection that owns this interface, when it is a tunnel of ours. */
+  connectionId?: string;
+  profileId?: string;
+  /** Synthesized by mock mode; does not exist in the OS. */
+  simulated?: boolean;
+}
+
+export type ThemeSetting = 'system' | 'light' | 'dark';
+
+export interface AppSettings {
+  theme: ThemeSetting;
+  /** null = auto detect. */
+  openvpnPath: string | null;
+  checkPublicIp: boolean;
+  launchAtLogin: boolean;
+}
+
+export interface OpenVpnBinaryInfo {
+  path: string;
+  version: string | null;
+  source: 'custom' | 'bundled' | 'system';
+}
+
+export interface AppInfo {
+  version: string;
+  platform: string;
+  arch: string;
+  mockMode: boolean;
+  openvpn: OpenVpnBinaryInfo | null;
+}
