@@ -14,6 +14,8 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
 const api: VpnApi = {
   getAppInfo: () => invoke(IPC.appGetInfo),
   onAppInfo: (cb) => subscribe(EVENTS.appInfoChanged, cb),
+  onNavigate: (cb) => subscribe(EVENTS.navigate, cb),
+  onRouteConflict: (cb) => subscribe(EVENTS.routeConflict, cb),
 
   connect: (profileId, options) => invoke(IPC.vpnConnect, profileId, options ?? {}),
   connectMany: (profileIds) => invoke(IPC.vpnConnectMany, profileIds),

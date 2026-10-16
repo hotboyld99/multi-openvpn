@@ -14,14 +14,13 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "helper:dev": "node scripts/dev-helper.mjs"
+    "helper:dev": "node scripts/dev-helper.mjs",
+    "icons": "node scripts/make-icons.mjs",
+    "dist:mac": "electron-vite build && electron-builder --mac",
+    "dist:win": "electron-vite build && electron-builder --win",
+    "dist:dir": "electron-vite build && electron-builder --dir"
   },
-  "dependencies": {
-    "lucide-react": "^1.57.0",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "zod": "^4.6.7"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.6.5",
@@ -31,9 +30,14 @@
     "electron": "^44.8.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^6.0.0",
+    "lucide-react": "^1.57.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
-    "vitest": "^5.0.5"
-  }
+    "vitest": "^5.0.5",
+    "zod": "^4.6.7"
+  },
+  "author": "Trung Hieu"
 }

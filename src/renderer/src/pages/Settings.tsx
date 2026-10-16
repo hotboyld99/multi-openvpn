@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { FolderOpen, Monitor, Moon, ScanSearch, ShieldCheck, ShieldAlert, Sun } from 'lucide-react';
 import type { OpenVpnBinaryInfo, ThemeSetting } from '../../../shared/types';
-import { Button, Card, PageHeader, Pill } from '../components/ui';
+import { Button, Card, PageHeader, Pill, Toggle } from '../components/ui';
 import { cn } from '../lib/format';
 import { run, useStore } from '../store';
 
@@ -153,6 +153,20 @@ export function Settings() {
                 <Icon className="h-3.5 w-3.5" /> {label}
               </button>
             ))}
+          </div>
+        </Section>
+
+        <Section title="Startup">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div>Start app when operating system starts</div>
+              <div className="text-xs text-muted">Starts in the tray; profiles marked “Connect on startup” connect automatically.</div>
+            </div>
+            <Toggle
+              label="Start app when operating system starts"
+              checked={settings.launchAtLogin}
+              onChange={(v) => run(() => window.vpn.settings.update({ launchAtLogin: v }))}
+            />
           </div>
         </Section>
 

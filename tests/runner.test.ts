@@ -21,7 +21,7 @@ describe('OpenVpnBinaryManager', () => {
   it('lists bundled, well-known and PATH candidates per platform without hard-coding one path', () => {
     const mac = new OpenVpnBinaryManager({ bundledRoot: '/app/res', platform: 'darwin', arch: 'arm64', env: { PATH: '/usr/bin:/opt/x/bin' } });
     const paths = mac.candidates().map((c) => c.path);
-    expect(paths[0]).toBe('/app/res/macos-arm64/openvpn');
+    expect(paths[0]).toBe('/app/res/mac-arm64/openvpn');
     expect(paths).toEqual(expect.arrayContaining(['/opt/homebrew/sbin/openvpn', '/usr/local/sbin/openvpn', '/opt/x/bin/openvpn']));
 
     const win = new OpenVpnBinaryManager({
@@ -31,7 +31,7 @@ describe('OpenVpnBinaryManager', () => {
       env: { ProgramFiles: 'D:\\Programs', Path: 'C:\\Tools' },
     });
     const wpaths = win.candidates().map((c) => c.path);
-    expect(wpaths[0]).toMatch(/windows-x64[\\/]openvpn\.exe$/);
+    expect(wpaths[0]).toMatch(/win-x64[\\/]openvpn\.exe$/);
     expect(wpaths).toEqual(expect.arrayContaining(['D:\\Programs\\OpenVPN\\bin\\openvpn.exe', 'C:\\Program Files\\OpenVPN\\bin\\openvpn.exe', 'C:\\Tools\\openvpn.exe']));
   });
 

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, nativeTheme, safeStorage, shell } from 'electron';
 import { readFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +8,7 @@ import type { AppInfo, HelperStatus, OpenVpnBinaryInfo } from '../shared/types';
 import { HelperClient } from './helper/HelperClient';
 import { defaultHelperBase } from './helper/protocol';
 import type { PlatformNetworkService } from './platform/PlatformNetworkService';
+import { AppShell } from './appShell';
 import type { AppContext } from './context';
 import { setTrustedOrigin } from './ipc/handle';
 import { registerNetworkIpc } from './ipc/network.ipc';
@@ -24,15 +25,14 @@ import { MockVpnDriver } from './vpn/MockVpnDriver';
 import { OpenVpnBinaryManager } from './vpn/OpenVpnBinaryManager';
 import { OpenVpnDriver } from './vpn/OpenVpnDriver';
 import type { DriverFactory } from './vpn/VpnDriver';
-import { VpnManager } from './vpn/VpnManager';
+import { RouteConflictError, VpnManager } from './vpn/VpnManager';
 import { VpnProcessManager } from './vpn/VpnProcessManager';
 
 const mockMode = process.env.VPN_MOCK_MODE === 'true';
 const rendererUrl = process.env.ELECTRON_RENDERER_URL;
 const rendererFile = join(__dirname, '../renderer/index.html');
 
-let mainWindow: BrowserWindow | null = null;
-let quitting = false;
+let appShell: AppShell | null = null;
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -43,7 +43,7 @@ function createWindow(): BrowserWindow {
     show: false,
     title: 'Multi OpenVPN',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-    backgroundColor: '#0b0d12',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0b0d12' : '#f7f8fa', // no flash before the UI paints
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -51,8 +51,6 @@ function createWindow(): BrowserWindow {
       sandbox: true,
     },
   });
-  win.once('ready-to-show', () => win.show());
-  win.on('closed', () => (mainWindow = null));
   if (rendererUrl) void win.loadURL(rendererUrl);
   else void win.loadFile(rendererFile);
   return win;
@@ -139,9 +137,7 @@ async function bootstrap(): Promise<void> {
     helper: helperStatus,
   });
 
-  const send = (channel: string, ...args: unknown[]): void => {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, ...args);
-  };
+  const send = (channel: string, ...args: unknown[]): void => appShell?.send(channel, ...args);
 
   const refreshBinary = async (): Promise<void> => {
     openvpn = await binaries.resolve(settings.get().openvpnPath);
@@ -188,7 +184,7 @@ async function bootstrap(): Promise<void> {
     helperRoots: [profiles.profilesDir, tempRoot],
     connectHelper,
     appInfo,
-    window: () => mainWindow,
+    window: () => appShell?.window ?? null,
   };
 
   const devOrigin = rendererUrl ? new URL(rendererUrl).origin : null;
@@ -256,31 +252,33 @@ async function bootstrap(): Promise<void> {
   profiles.on('changed', (list) => send(EVENTS.profilesChanged, list));
   settings.on('changed', (s) => send(EVENTS.settingsChanged, s));
 
-  // Never leave openvpn processes running when the app exits. (Quit dialog + tray: Phase 9.)
-  app.on('before-quit', (event) => {
-    if (quitting || manager.activeCount() === 0) return;
-    event.preventDefault();
-    quitting = true;
-    void manager.disconnectAll().finally(() => app.quit());
-  });
+  // Window, tray and quit flow (asks before quitting with active VPNs, disconnects cleanly).
+  appShell = new AppShell({ manager, profiles, createWindow });
+  appShell.start(!AppShell.startHidden());
+  appShell.applyLoginItem(settings.get());
+  settings.on('changed', (s) => appShell?.applyLoginItem(s));
 
-  mainWindow = createWindow();
-  app.on('activate', () => {
-    if (!mainWindow) mainWindow = createWindow();
-  });
+  // Auto-connect profiles. A default-route conflict never blocks startup: such a profile
+  // connects without the default route and says so in its log.
+  for (const p of profiles.list().filter((x) => x.autoConnect)) {
+    try {
+      manager.connect(p.id);
+    } catch (err) {
+      if (!(err instanceof RouteConflictError)) throw err;
+      const id = manager.connect(p.id, { defaultRoute: 'skip' });
+      manager.appendLog(id, 'warn', 'Auto-connect: another VPN owns the default route; connected without it');
+    }
+  }
 }
 
+// Only reached when the window closed with no active VPN (otherwise the shell asks first).
 app.on('window-all-closed', () => app.quit());
 
 // One instance only: two instances would share (and clean up) each other's openvpn processes.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    if (!mainWindow) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
-  });
+  app.on('second-instance', () => appShell?.show());
 }
 
 app

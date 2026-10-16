@@ -8,6 +8,7 @@ import type {
   NetworkInterfaceInfo,
   OpenVpnBinaryInfo,
   ProfileScan,
+  RouteConflict,
   RouteInfo,
   SecretInput,
   VpnConnection,
@@ -66,6 +67,10 @@ export const EVENTS = {
   profilesChanged: 'profiles:changed',
   settingsChanged: 'settings:changed',
   appInfoChanged: 'app:infoChanged',
+  /** Main asks the UI to show a page (tray "Open Dashboard"). */
+  navigate: 'app:navigate',
+  /** A connect started outside the UI (tray) hit a default-route conflict. */
+  routeConflict: 'vpn:routeConflict',
 } as const;
 
 export interface LogEvent {
@@ -79,6 +84,8 @@ type Unsubscribe = () => void;
 export interface VpnApi {
   getAppInfo(): Promise<AppInfo>;
   onAppInfo(cb: (info: AppInfo) => void): Unsubscribe;
+  onNavigate(cb: (page: string) => void): Unsubscribe;
+  onRouteConflict(cb: (conflict: RouteConflict) => void): Unsubscribe;
 
   /** Resolves with a conflict instead of connecting when the default route is owned by another VPN. */
   connect(profileId: string, options?: ConnectOptions): Promise<ConnectResult>;

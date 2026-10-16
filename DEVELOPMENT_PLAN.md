@@ -35,7 +35,7 @@ short report (Completed / Changed files / Decisions / How to test / Limitations 
 | 6 Routing | done |
 | 7 DNS | done |
 | 8 Security | done |
-| 9 Production | pending |
+| 9 Production | done |
 
 ## Testing real OpenVPN without root
 

@@ -14,7 +14,8 @@ export interface BinaryManagerOptions {
   env?: NodeJS.ProcessEnv;
 }
 
-const PLATFORM_DIR: Partial<Record<NodeJS.Platform, string>> = { darwin: 'macos', win32: 'windows', linux: 'linux' };
+// Same names as electron-builder's ${os}-${arch}, so extraResources can copy them as-is.
+const PLATFORM_DIR: Partial<Record<NodeJS.Platform, string>> = { darwin: 'mac', win32: 'win', linux: 'linux' };
 
 /**
  * Finds the OpenVPN Community binary: user choice → bundled → well-known system paths → PATH.

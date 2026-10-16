@@ -3,6 +3,7 @@
 //
 //   helper.js                 serve requests (config from MULTI_OPENVPN_HELPER_CONFIG or the default path)
 //   helper.js --setup <json>  install-time, as root: write config + token for the installing user
+//   helper.js --setup-args --root <dir>... --binary <path>...   same, flag form (Windows installer)
 import { randomBytes } from 'node:crypto';
 import { chownSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -66,8 +67,20 @@ async function serve(): Promise<void> {
   process.on('SIGINT', stop);
 }
 
+/** `--root a --root b --binary x` → setup JSON (lets the NSIS installer avoid JSON escaping). */
+function argsToSetup(argv: string[]): string {
+  const roots: string[] = [];
+  const binaries: string[] = [];
+  for (let k = 0; k < argv.length; k++) {
+    if (argv[k] === '--root') roots.push(argv[++k]);
+    else if (argv[k] === '--binary') binaries.push(argv[++k]);
+  }
+  return JSON.stringify({ allowedRoots: roots, binaries });
+}
+
 const i = process.argv.indexOf('--setup');
-(i >= 0 ? setup(process.argv[i + 1] ?? '{}') : serve()).catch((err) => {
+const j = process.argv.indexOf('--setup-args');
+(i >= 0 ? setup(process.argv[i + 1] ?? '{}') : j >= 0 ? setup(argsToSetup(process.argv.slice(j + 1))) : serve()).catch((err) => {
   console.error(err instanceof Error ? err.message : err);
   process.exit(1);
 });

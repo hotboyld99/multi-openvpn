@@ -145,6 +145,8 @@ export async function initStore(): Promise<void> {
   api.profiles.onChanged((profiles) => set(() => ({ profiles })));
   api.settings.onChanged((settings) => set(() => ({ settings })));
   api.onAppInfo((appInfo) => set(() => ({ appInfo })));
+  api.onNavigate((page) => navigate(page as Page));
+  api.onRouteConflict((conflict) => set((s) => ({ routeConflicts: [...s.routeConflicts, conflict] })));
 
   const [appInfo, settings, profiles, connections] = await Promise.all([
     api.getAppInfo(),
