@@ -15,11 +15,19 @@ export type MgmtMessage =
   | { kind: 'log'; time: number; flags: string; message: string }
   | { kind: 'bytecount'; bytesIn: number; bytesOut: number }
   | { kind: 'hold'; message: string }
-  | { kind: 'password'; action: 'need'; realm: string; needsUsername: boolean; challenge?: string }
+  | { kind: 'password'; action: 'need'; realm: string; needsUsername: boolean; challenge?: StaticChallenge }
   | { kind: 'password'; action: 'failed'; realm: string }
   | { kind: 'fatal'; message: string }
   | { kind: 'info'; message: string }
   | { kind: 'other'; type: string; payload: string };
+
+/** `static-challenge` of the config: the password must carry the user's response (OTP). */
+export interface StaticChallenge {
+  text: string;
+  echo: boolean;
+  /** Flag bit 2 (openvpn 2.6.12+ `static-challenge ... concat`): send password+response, not SCRV1. */
+  concat: boolean;
+}
 
 const opt = (s: string | undefined): string | undefined => (s ? s : undefined);
 
@@ -70,8 +78,12 @@ export function parseRealtime(line: string): MgmtMessage {
     case 'PASSWORD': {
       const failed = /^Verification Failed: '([^']+)'/.exec(payload);
       if (failed) return { kind: 'password', action: 'failed', realm: failed[1] };
-      const need = /^Need '([^']+)' (username\/password|password)(?: SC:\d,(.*))?/.exec(payload);
-      if (need) return { kind: 'password', action: 'need', realm: need[1], needsUsername: need[2] === 'username/password', challenge: need[3] };
+      const need = /^Need '([^']+)' (username\/password|password)(?: SC:(\d+),(.*))?/.exec(payload);
+      if (need) {
+        const flags = Number(need[3]);
+        const challenge = need[3] === undefined ? undefined : { text: need[4], echo: (flags & 1) !== 0, concat: (flags & 2) !== 0 };
+        return { kind: 'password', action: 'need', realm: need[1], needsUsername: need[2] === 'username/password', challenge };
+      }
       return { kind: 'other', type, payload };
     }
     case 'FATAL':
@@ -118,3 +130,7 @@ export function quoteArg(value: string): string {
 
 export const usernameCommand = (realm: string, username: string): string => `username ${quoteArg(realm)} ${quoteArg(username)}`;
 export const passwordCommand = (realm: string, password: string): string => `password ${quoteArg(realm)} ${quoteArg(password)}`;
+
+/** The password openvpn expects for a static challenge: `SCRV1:base64(password):base64(response)`, or both concatenated. */
+export const staticChallengePassword = (password: string, response: string, concat: boolean): string =>
+  concat ? password + response : `SCRV1:${Buffer.from(password).toString('base64')}:${Buffer.from(response).toString('base64')}`;

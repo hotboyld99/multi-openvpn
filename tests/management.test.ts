@@ -4,7 +4,7 @@ import { createServer, type AddressInfo, type Server, type Socket } from 'node:n
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { classifyLine, levelFromFlags } from '../src/main/vpn/LogClassifier';
-import { ManagementParser, parseRealtime, passwordCommand, quoteArg, usernameCommand } from '../src/main/vpn/managementProtocol';
+import { ManagementParser, parseRealtime, passwordCommand, quoteArg, staticChallengePassword, usernameCommand } from '../src/main/vpn/managementProtocol';
 import { OpenVpnDriver } from '../src/main/vpn/OpenVpnDriver';
 import { OpenVpnManagementClient } from '../src/main/vpn/OpenVpnManagementClient';
 import { VpnManager } from '../src/main/vpn/VpnManager';
@@ -41,7 +41,7 @@ describe('management protocol parser', () => {
     expect(parseRealtime('>HOLD:Waiting for hold release:0')).toEqual({ kind: 'hold', message: 'Waiting for hold release:0' });
     expect(parseRealtime(">PASSWORD:Need 'Auth' username/password")).toEqual({ kind: 'password', action: 'need', realm: 'Auth', needsUsername: true, challenge: undefined });
     expect(parseRealtime(">PASSWORD:Need 'Private Key' password")).toMatchObject({ action: 'need', realm: 'Private Key', needsUsername: false });
-    expect(parseRealtime(">PASSWORD:Need 'Auth' username/password SC:1,Enter PIN")).toMatchObject({ realm: 'Auth', challenge: 'Enter PIN' });
+    expect(parseRealtime(">PASSWORD:Need 'Auth' username/password SC:1,Enter PIN")).toMatchObject({ realm: 'Auth', challenge: { text: 'Enter PIN', echo: true, concat: false } });
     expect(parseRealtime(">PASSWORD:Verification Failed: 'Auth'")).toEqual({ kind: 'password', action: 'failed', realm: 'Auth' });
     expect(parseRealtime('>FATAL:Error: private key password verification failed')).toEqual({ kind: 'fatal', message: 'Error: private key password verification failed' });
     expect(parseRealtime('>NEED-OK:whatever')).toEqual({ kind: 'other', type: 'NEED-OK', payload: 'whatever' });
@@ -61,6 +61,8 @@ describe('management protocol parser', () => {
     expect(usernameCommand('Auth', 'alice')).toBe('username "Auth" "alice"');
     expect(passwordCommand('Private Key', 'p w')).toBe('password "Private Key" "p w"');
     expect(() => passwordCommand('Auth', 'x"\nsignal SIGTERM')).toThrow(/control character/);
+    expect(staticChallengePassword('pass', '123456', false)).toBe('SCRV1:cGFzcw==:MTIzNDU2');
+    expect(staticChallengePassword('pass', '123456', true)).toBe('pass123456');
   });
 });
 

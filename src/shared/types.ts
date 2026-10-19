@@ -99,11 +99,17 @@ export interface AuthRequest {
   needsUsername: boolean;
   /** Prefill for the username field. */
   username?: string;
+  /** `static-challenge` prompt (e.g. "Enter Authenticator Code"); ask for a response too. */
+  challenge?: { text: string; echo: boolean };
+  /** The password is saved: ask only for the challenge response. */
+  savedPassword?: boolean;
 }
 
 export interface SecretInput {
   username?: string;
   password: string;
+  /** Static-challenge response (OTP). One-time: never saved. */
+  response?: string;
 }
 
 export interface VpnConnection {

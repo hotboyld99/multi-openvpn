@@ -6,7 +6,7 @@ import { VpnErrorCode, type LogLevel, type OpenVpnBinaryInfo } from '../../share
 import { directivesToStrip, resolveCustomRoutes, routingArgs, type RoutingPlan } from '../network/routingPolicy';
 import { classifyLine, dnsFromOptions, levelFromFlags, levelFromText } from './LogClassifier';
 import { allDirectives, analyzeConfig, parseConfig, serializeConfig, type ConfigNode } from './OpenVpnConfigParser';
-import { passwordCommand, usernameCommand, type MgmtMessage } from './managementProtocol';
+import { passwordCommand, staticChallengePassword, usernameCommand, type MgmtMessage, type StaticChallenge } from './managementProtocol';
 import { OpenVpnManagementClient } from './OpenVpnManagementClient';
 import { VpnDriverError, type DriverContext, type VpnDriver } from './VpnDriver';
 import { VpnProcess, type Launcher } from './VpnProcess';
@@ -226,7 +226,7 @@ export class OpenVpnDriver implements VpnDriver {
           this.onLogLine('error', `Verification Failed: '${m.realm}'`);
           return;
         }
-        await this.answerPassword(m.realm, m.needsUsername);
+        await this.answerPassword(m.realm, m.needsUsername, m.challenge);
         return;
       case 'fatal':
         this.onLogLine('error', m.message);
@@ -237,14 +237,15 @@ export class OpenVpnDriver implements VpnDriver {
     }
   }
 
-  private async answerPassword(realm: string, needsUsername: boolean): Promise<void> {
+  private async answerPassword(realm: string, needsUsername: boolean, challenge?: StaticChallenge): Promise<void> {
     this.ctx.emit({ type: 'state', state: 'AUTH' });
-    const secret = await this.ctx.requestSecret({ realm, needsUsername });
+    const secret = await this.ctx.requestSecret({ realm, needsUsername, challenge });
     const mgmt = this.mgmt;
     if (!secret || !mgmt?.connected) return; // cancelled: VpnManager is already disconnecting
     try {
       if (needsUsername) await mgmt.command(usernameCommand(realm, secret.username ?? ''));
-      await mgmt.command(passwordCommand(realm, secret.password));
+      const password = challenge ? staticChallengePassword(secret.password, secret.response ?? '', challenge.concat) : secret.password;
+      await mgmt.command(passwordCommand(realm, password));
     } catch (err) {
       // Never include the command (it holds the secret) in the message.
       this.reportError(vpnError(VpnErrorCode.UNKNOWN, `Could not send credentials: ${(err as Error).message}`));

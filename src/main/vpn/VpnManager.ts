@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { isRetryable, vpnError } from '../../shared/errors';
 import {
   isLive,
+  type AuthRequest,
   VpnErrorCode,
   type ConnectOptions,
   type LogEntry,
@@ -13,7 +14,7 @@ import {
   type VpnProfile,
 } from '../../shared/types';
 import { decideDefaultRoute } from '../network/routingPolicy';
-import { mapOpenVpnState, VpnDriverError, type DriverEvent, type DriverFactory, type VpnDriver } from './VpnDriver';
+import { mapOpenVpnState, VpnDriverError, type DriverEvent, type DriverFactory, type SecretRequest, type VpnDriver } from './VpnDriver';
 
 /** Automatic reconnect delays; the last value repeats. */
 export const BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 30_000, 60_000];
@@ -34,6 +35,8 @@ interface Entry {
   retryTimer?: ReturnType<typeof setTimeout>;
   /** Outstanding credential prompt; resolved by submitSecret/cancel or when the process goes away. */
   secretWaiter?: (secret: SecretInput | null) => void;
+  /** Saved credentials behind a `savedPassword` prompt; completed with the user's OTP. Main only. */
+  storedSecret?: SecretInput;
   /** Byte counters restart with every process; totals carry over between attempts. */
   baseIn: number;
   baseOut: number;
@@ -244,8 +247,10 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
     const entry = this.require(connectionId);
     const waiter = entry.secretWaiter;
     if (!waiter) throw new Error('This connection is not waiting for credentials');
-    if (remember && entry.conn.authRequest) entry.toRemember.push({ realm: entry.conn.authRequest.realm, secret });
-    this.settleSecret(entry, secret);
+    const req = entry.conn.authRequest;
+    const { response: _otp, ...reusable } = secret; // the OTP is single-use: never remember it
+    if (remember && req && !req.savedPassword) entry.toRemember.push({ realm: req.realm, secret: reusable });
+    this.settleSecret(entry, req?.savedPassword ? { ...entry.storedSecret!, response: secret.response } : secret);
   }
 
   /** The user dismissed the credential prompt: stop this connection. */
@@ -257,7 +262,9 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
 
   // ---------------------------------------------------------------------------
 
-  private async requestSecret(entry: Entry, generation: number, realm: string, needsUsername: boolean): Promise<SecretInput | null> {
+  private async requestSecret(entry: Entry, generation: number, req: SecretRequest): Promise<SecretInput | null> {
+    const { realm, needsUsername } = req;
+    const challenge = req.challenge && { text: req.challenge.text, echo: req.challenge.echo };
     if (entry.generation !== generation) return null;
     // A remembered secret is tried once per attempt; if openvpn asks again, it was wrong.
     if (!entry.usedStored.has(realm)) {
@@ -266,24 +273,28 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
       if (stored) {
         entry.usedStored.add(realm);
         this.log(entry, 'info', `Using saved ${realm === 'Auth' ? 'credentials' : `${realm} password`}`);
-        return stored;
+        if (!challenge) return stored;
+        // The OTP changes every time: still ask for it, but only for it.
+        return this.promptSecret(entry, { realm, needsUsername, challenge, savedPassword: true }, stored);
       }
     }
-    return this.promptSecret(entry, realm, needsUsername);
+    return this.promptSecret(entry, { realm, needsUsername, challenge });
   }
 
-  private promptSecret(entry: Entry, realm: string, needsUsername: boolean): Promise<SecretInput | null> {
+  private promptSecret(entry: Entry, request: Omit<AuthRequest, 'username'>, stored?: SecretInput): Promise<SecretInput | null> {
     this.settleSecret(entry, null); // a newer prompt replaces an unanswered one
     const profile = this.deps.getProfile(entry.conn.profileId);
+    entry.storedSecret = stored;
     return new Promise((resolve) => {
       entry.secretWaiter = resolve;
-      this.patch(entry, { status: 'AUTH', authRequest: { realm, needsUsername, username: profile?.username } });
+      this.patch(entry, { status: 'AUTH', authRequest: { ...request, username: profile?.username } });
     });
   }
 
   private settleSecret(entry: Entry, secret: SecretInput | null): void {
     const waiter = entry.secretWaiter;
     entry.secretWaiter = undefined;
+    entry.storedSecret = undefined;
     if (entry.conn.authRequest) this.patch(entry, { authRequest: undefined });
     waiter?.(secret);
   }
@@ -322,7 +333,7 @@ export class VpnManager extends EventEmitter<VpnManagerEvents> {
       emit: (event) => {
         if (entry.generation === generation) this.onDriverEvent(entry, event);
       },
-      requestSecret: (req) => this.requestSecret(entry, generation, req.realm, req.needsUsername),
+      requestSecret: (req) => this.requestSecret(entry, generation, req),
       routing: { defaultRoute },
     });
     entry.driver = driver;

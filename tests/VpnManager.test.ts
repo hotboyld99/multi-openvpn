@@ -315,3 +315,30 @@ describe('VpnManager error precedence', () => {
     expect(manager.get(id)!.error?.code).toBe(VpnErrorCode.AUTH_FAILED);
   });
 });
+
+describe('VpnManager static challenge', () => {
+  it('with a saved password asks only for the OTP and never remembers it', async () => {
+    const a = profile('a');
+    const drivers: FakeDriver[] = [];
+    const manager = new VpnManager({
+      getProfile: () => a,
+      getStoredSecret: async () => ({ username: 'u', password: 'saved' }),
+      createDriver: (ctx) => {
+        const d = new FakeDriver(ctx);
+        drivers.push(d);
+        return d;
+      },
+    });
+    const id = manager.connect(a.id);
+    await flush();
+    const answer = drivers[0].ctx.requestSecret({ realm: 'Auth', needsUsername: true, challenge: { text: 'Enter Authenticator Code', echo: true, concat: false } });
+    await vi.waitFor(() => expect(manager.get(id)!.authRequest).toMatchObject({ savedPassword: true, challenge: { text: 'Enter Authenticator Code', echo: true } }));
+    manager.submitSecret(id, { password: '', response: '123456' }, true);
+    expect(await answer).toEqual({ username: 'u', password: 'saved', response: '123456' });
+
+    const remembered = vi.fn();
+    manager.on('credentialsVerified', remembered);
+    drivers[0].connectUp();
+    expect(remembered).not.toHaveBeenCalled(); // savedPassword prompt: nothing new to store
+  });
+});

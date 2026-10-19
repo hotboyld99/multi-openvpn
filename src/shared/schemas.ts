@@ -53,6 +53,7 @@ export const SecretInputSchema = z
   .object({
     username: noControl(256).optional(),
     password: noControl(1024),
+    response: noControl(256).optional(),
   })
   .strict();
 

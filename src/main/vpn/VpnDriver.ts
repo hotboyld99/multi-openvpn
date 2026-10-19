@@ -1,3 +1,4 @@
+import type { StaticChallenge } from './managementProtocol';
 import type { LogLevel, SecretInput, VpnError, VpnProfile, VpnStatus } from '../../shared/types';
 
 /**
@@ -34,6 +35,7 @@ export interface VpnDriver {
 export interface SecretRequest {
   realm: string;
   needsUsername: boolean;
+  challenge?: StaticChallenge;
 }
 
 export interface DriverContext {
